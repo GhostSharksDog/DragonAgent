@@ -4,7 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { AgentSession, AppSettings, MemoryFact } from '../shared/contracts';
 
-export interface PersistentState { settings: AppSettings; sessions: AgentSession[]; selectedSessionId: string | null; memory: MemoryFact[]; imports: string[] }
+export interface PersistentState { settings: AppSettings; sessions: AgentSession[]; selectedSessionId: string | null; memory: MemoryFact[]; imports: string[]; pendingSessionDeletes?: string[] }
 export function initialState(): PersistentState {
   return {
     settings: { profiles: [], selectedProfile: '', codexPath: '', theme: 'light', limits: { concurrency: 3, children: 12, requests: 64 },

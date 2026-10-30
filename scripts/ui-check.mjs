@@ -56,7 +56,8 @@ try {
   await pet.screenshot({ path: 'test-results/pet.png' });
   await pet.getByRole('button', { name: '输入消息', exact: true }).click();
   const bubble = windows.find(w => w.url().includes('view=bubble'));
-  await bubble.getByRole('button', { name: '打开工作台' }).waitFor();
+  await bubble.getByRole('button', { name: '切换到详细版' }).click();
+  await bubble.getByRole('button', { name: '新的对话', exact: true }).waitFor();
   await bubble.screenshot({ path: 'test-results/bubble.png' });
   const expectedVersion = JSON.parse(await readFile('package.json', 'utf8')).version;
   assert.equal((await page.evaluate(() => window.dragon.snapshot())).version, expectedVersion);
@@ -116,6 +117,9 @@ try {
   await page.getByRole('textbox', { name: '发送给龙娘的消息' }).fill('保存测试文件');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
   await bubble.getByRole('button', { name: '允许本次操作', exact: true }).waitFor({ timeout: 60000 });
+  await page.evaluate(() => window.dragon.action({ type: 'pet.chatMode', mode: 'simple' }));
+  await bubble.getByRole('button', { name: '1 项待确认', exact: true }).click();
+  await bubble.getByRole('button', { name: '允许本次操作', exact: true }).waitFor();
   await page.screenshot({ path: 'test-results/approval.png' });
   await bubble.getByRole('button', { name: '允许本次操作', exact: true }).click();
   await page.locator('.prose').filter({ hasText: /^已写入测试文件。$/ }).waitFor({ timeout: 30000 });

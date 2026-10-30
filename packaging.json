@@ -6,7 +6,7 @@
   "electronVersion": "45.0.0",
   "electronDist": "../../node_modules/electron/dist",
   "directories": {
-    "output": "../../release/0.2.3"
+    "output": "../../release/0.2.4"
   },
   "files": [
     "dist/**/*",

@@ -1,6 +1,6 @@
 {
   "name": "dragon-agent",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "description": "银白龙娘 · TypeScript 桌面 Agent 工作台",
   "main": "dist/main/index.cjs",
@@ -42,7 +42,7 @@
     "appId": "local.dragonagent.desktop",
     "productName": "DragonAgent",
     "directories": {
-      "output": "release/0.2.3"
+      "output": "release/0.2.4"
     },
     "files": [
       "dist/**/*",

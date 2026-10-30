@@ -45,6 +45,11 @@ function syncWindows() {
   if (pet.getBounds().width !== size) pet.setSize(size, height);
   pet.setAlwaysOnTop(config.alwaysOnTop, 'floating'); bubble.setAlwaysOnTop(config.alwaysOnTop, 'floating');
   if (config.visible) pet.showInactive(); else pet.hide();
+  const bubbleHeight = runtime.view.petView === 'quota' || config.chatMode === 'detailed' ? 460 : 184;
+  if (bubble.getBounds().height !== bubbleHeight) {
+    // Windows locks min/max bounds on non-resizable windows; unlock only for this programmatic resize.
+    bubble.setResizable(true); bubble.setSize(390, bubbleHeight); bubble.setResizable(false);
+  }
   moveBubble();
   if (config.visible && runtime.view.petView !== 'hidden') bubble.showInactive(); else bubble.hide();
 }
@@ -79,7 +84,7 @@ async function action(value: Action) {
       const result = await dialog.showOpenDialog(workbench, { title: '选择 Legacy SQLite 数据库（只读导入）', filters: [{ name: 'SQLite', extensions: ['db', 'sqlite', 'sqlite3'] }], properties: ['openFile'] });
       if (result.canceled) return; const imported = importLegacy(result.filePaths[0], runtime.state); runtime.changed(); return imported;
     }
-    default: { const result = await runtime.action(value); if (value.type === 'settings.save') syncWindows(); return result; }
+    default: { const result = await runtime.action(value); if (value.type === 'settings.save' || value.type === 'pet.chatMode') syncWindows(); return result; }
   }
 }
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -89,6 +94,7 @@ else {
     const home = app.getPath('userData');
     const store = new Store(home);
     runtime = new Runtime(store, new Secrets(store), { home, version: app.getVersion(), workerPath: path.join(root, 'main/agent-worker.cjs'), open });
+    await runtime.cleanDeletedSessions().catch(() => console.warn('已删除对话的缓存清理尚未完成，将在下次启动重试。'));
     syncTheme();
     nativeTheme.on('updated', () => { syncTheme(); runtime.changed(false); });
     if (!runtime.state.settings.codexPath && app.isPackaged) runtime.state.settings.codexPath = path.join(root, 'runtime/codex/bin/codex.exe');

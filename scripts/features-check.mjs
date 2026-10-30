@@ -27,7 +27,7 @@ try{await app.firstWindow();await new Promise(r=>setTimeout(r,600));page=app.win
  const pngBytes=await app.evaluate(async({BrowserWindow})=>{const w=new BrowserWindow({show:false});await w.loadURL('data:text/html,<p>PDF_MARKER_663</p>');const data=await w.webContents.printToPDF({});w.destroy();return data.toString('base64');});await writeFile(pdf,Buffer.from(pngBytes,'base64'));
  const skin=await page.evaluate(async()=>(await window.dragon.snapshot()).skin.manifest.animations.idle.frames[0]);await copyFile(path.join('assets/skins/silver-dragon-frames',skin),png);
  await page.evaluate(baseUrl=>window.dragon.action({type:'profile.save',profile:{id:'fixture',name:'验收',provider:'custom',protocol:'openai-completions',baseUrl,model:'fixture',contextWindow:524288,maxOutput:32768,hasKey:false},apiKey:'fixture'}),`http://127.0.0.1:${server.address().port}/v1`);
- await page.evaluate(()=>window.dragon.action({type:'pet.toggle'}));await page.evaluate(()=>window.dragon.action({type:'pet.view',view:'compose'}));
+ await page.evaluate(()=>window.dragon.action({type:'pet.toggle'}));await page.evaluate(()=>window.dragon.action({type:'pet.view',view:'compose'}));await page.evaluate(()=>window.dragon.action({type:'pet.chatMode',mode:'detailed'}));
  const source=await page.evaluate(()=>window.dragon.action({type:'session.create',backend:'dragon'}));await page.evaluate(id=>window.dragon.action({type:'session.send',id,text:'历史资料 CHAT_MARKER_776',commandId:'source'}),source);await wait(source);
  let id=await page.evaluate(workspace=>window.dragon.action({type:'session.create',backend:'dragon',workspace}),inside);
  await app.evaluate(({dialog},files)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:files});},[txt,docx,pdf,png]);

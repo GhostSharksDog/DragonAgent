@@ -1,6 +1,12 @@
 import React from 'react';
 export function Icon({ name, size = 20 }: { name: string; size?: number }) {
   const paths: Record<string, React.ReactNode> = {
+    trash: <><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></>,
+    lightning: <path d="m13 2-9 12h7l-1 8 10-13h-7Z"/>,
+    reset: <path d="M4 10a8 8 0 1 1 1 8M4 4v6h6"/>,
+    expand: <path d="M9 3H3v6M15 21h6v-6M3 3l7 7m11 11-7-7"/>,
+    collapse: <path d="M3 9h6V3m12 12h-6v6M9 9 3 3m12 12 6 6"/>,
+    external: <path d="M13 3h8v8M21 3 10 14M9 3H3v18h18v-6"/>,
     plus: <path d="M12 5v14M5 12h14"/>, chat: <path d="M5 4h14a2 2 0 0 1 2 2v11H8l-5 4V6a2 2 0 0 1 2-2Z"/>,
     settings: <><path d="m9.5 3-.6 2.4-2 .9-2.2-.7-2.5 4.3 1.7 1.7v2.3l-1.7 1.7 2.5 4.3 2.2-.7 2 .9.6 2.4h5l.6-2.4 2-.9 2.2.7 2.5-4.3-1.7-1.7v-2.3l1.7-1.7-2.5-4.3-2.2.7-2-.9-.6-2.4Z" transform="translate(0 -1) scale(1 .95)"/><circle cx="12" cy="11.5" r="3"/></>,
     arrow: <path d="M12 19V5m-6 6 6-6 6 6"/>, folder: <path d="M3 7V5h6l3 3h9v12H3Z"/>,

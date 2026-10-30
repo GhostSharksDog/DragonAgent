@@ -22,7 +22,7 @@ export interface AppSettings {
   selectedCodexModel?: string; selectedCodexEffort?: string;
   limits: { concurrency: number; children: number; requests: number };
   profiles: ModelProfile[]; selectedProfile: string; mcp: McpConfig[]; codexPath: string;
-  pet: { visible: boolean; scale: number; alwaysOnTop: boolean; x?: number; y?: number; shortcut: string };
+  pet: { visible: boolean; scale: number; alwaysOnTop: boolean; x?: number; y?: number; shortcut: string; chatMode?: 'simple' | 'detailed' };
   theme: 'light' | 'dark' | 'system';
 }
 export interface ChatMessage { id: string; commandId?: string; role: 'user' | 'assistant' | 'notice'; text: string; createdAt: number; runId?: string; partial?: boolean; attachments?: ChatAttachment[] }
@@ -79,6 +79,7 @@ export type Action =
   | { type: 'session.create'; backend: BackendKind; profileId?: string; workspace?: string; carryFrom?: string; model?: string; reasoningEffort?: string }
   | { type: 'session.select'; id: string }
   | { type: 'session.archive'; id: string }
+  | { type: 'session.delete'; id: string }
   | { type: 'session.draft'; id: string; text: string }
   | { type: 'session.workspace'; id: string }
   | { type: 'session.permissions'; id: string; origins: string[]; browserInput: boolean; terminalEnabled: boolean }
@@ -98,6 +99,7 @@ export type Action =
   | { type: 'settings.save'; theme?: AppSettings['theme']; codexPath?: string; pet?: Partial<AppSettings['pet']>; limits?: AppSettings['limits'] }
   | { type: 'pet.toggle' }
   | { type: 'pet.view'; view: Snapshot['petView'] }
+  | { type: 'pet.chatMode'; mode: 'simple' | 'detailed' }
   | { type: 'pet.drag'; dx: number; dy: number }
   | { type: 'window.workbench'; page?: 'chat' | 'settings' }
   | { type: 'window.menu' }

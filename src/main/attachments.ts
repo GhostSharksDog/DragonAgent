@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile, rm, realpath } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { ChatAttachment, AgentSession } from '../shared/contracts';
@@ -9,6 +9,17 @@ export const attachmentDefinition = { name:'pet_attachment_read', description:'�
 
 export class Attachments {
   constructor(private home: string) {}
+  async deleteSession(session: string) {
+    const target = path.dirname(this.filename(session, 'check', 'bin'));
+    const root = path.resolve(this.home, 'attachments');
+    if (path.dirname(path.resolve(target)) !== root) throw new Error('附件目录无效。');
+    // Refuse junctions that would take cleanup outside this application's attachment store.
+    try {
+      const actualRoot = await realpath(root), actual = await realpath(target);
+      if (path.dirname(actual) !== actualRoot || path.basename(actual) !== session) throw new Error('附件目录指向了其他位置。');
+      await rm(target, { recursive: true, force: true });
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  }
   private filename(session: string, id: string, extension: string) {
     if (!/^[A-Za-z0-9_-]+$/.test(session) || !/^[A-Za-z0-9_-]+$/.test(id)) throw new Error('附件标识无效。');
     return path.join(this.home,'attachments',session,`${id}.${extension}`);

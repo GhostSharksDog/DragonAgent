@@ -1,10 +1,14 @@
-# DragonAgent 0.2.3
+# DragonAgent 0.2.4
 
 银白龙娘主题的 Windows 桌面 Agent。**独立 TypeScript 执行内核；DSH 只作为架构参考，没有 DSH SDK、服务或运行依赖。** 工作台与原版龙娘共享聊天、草稿、任务和审批。
 
+最近对话右侧的垃圾桶可删除聊天；「记忆与历史 → 全部历史对话」也能删除已归档聊天。确认后清理本应用对话、任务记录和附件副本；工作文件、独立记忆、其他对话中的摘录以及 Codex 原生历史保留。执行中需先停止任务。
+
 ## 界面
 
-![Codex 模型选择与推理强度](docs/screenshots/codex-models.png)
+![Codex 推理强度](docs/screenshots/reasoning-popover.png)
+
+![桌宠简约输入](docs/screenshots/bubble-simple.png)
 
 [权限菜单](docs/screenshots/permissions-dark.png) · [深色窗口](docs/screenshots/window-dark.png)
 
@@ -12,18 +16,18 @@
 
 下载对应版本的安装包，或完整解压便携 ZIP 后运行 `DragonAgent.exe`。模型 API 与 Codex 登录在本机配置，仓库不包含账号数据。
 
-本机直接双击 `E:\Projects\DragonAgent\release\win-unpacked\DragonAgent.exe`。这是已更新到 0.2.3 的固定启动入口，仍使用原应用数据目录。
+本机直接双击 `E:\Projects\DragonAgent\release\win-unpacked\DragonAgent.exe`。这是已更新到 0.2.4 的固定启动入口，仍使用原应用数据目录。
 
-安装包与便携 ZIP 在 `release/0.2.3`：可运行 `DragonAgent-Setup-0.2.3.exe` 安装，或将 `DragonAgent-0.2.3-win.zip` 完整解压后运行其中的 `DragonAgent.exe`。请保留可执行文件旁的资源目录。桌面使用不需要安装 Node 或 Python。网页操作需要 Google Chrome。
+安装包与便携 ZIP 在 `release/0.2.4`：可运行 `DragonAgent-Setup-0.2.4.exe` 安装，或将 `DragonAgent-0.2.4-win.zip` 完整解压后运行其中的 `DragonAgent.exe`。请保留可执行文件旁的资源目录。桌面使用不需要安装 Node 或 Python。网页操作需要 Google Chrome。
 
 1. 在「设置 → 模型 API」添加服务地址、模型 ID、API Key 和服务商实际提供的上下文窗口。支持 Chat Completions、Responses、Anthropic Messages。
 2. 新建聊天，在输入框右下角的模型按钮中选择「其他模型」下的 API 配置，选择工作文件夹，然后发送任务。模型按需要调用文件、浏览器、命令、MCP 或子 Agent 工具。
 3. 在全请求批准模式下，文件变更会展示内容并请求批准。覆盖已有文件必须先读取它，携带读取到的版本提交修改；版本变化会拒绝覆盖。全请求批准模式下命令需启用并逐次审批，另外两档自动批准命令。
 4. 「工具连接」中填写 Tavily 密钥并启用，或添加自己的 stdio / Streamable HTTP MCP。连接失败可以点击「连接已启用服务」重连。失败操作不会自动重发。
 5. 「设置 → 任务协作与调用额度」调整限额。默认并行 3 个子任务、每棵任务树最多 12 个子任务、64 次模型请求。摘要和重试也消耗额度。右侧任务树可查看结果、用量，或停止单个子任务；停止主任务会停止整个任务树。
-6. 右上角「召唤龙娘」或 `Ctrl + Alt + D` 显示/收起桌宠。原来的外观、动画和手势保留：单击看回复、双击看 Codex 额度、聊天按钮输入、拖动移动、右键菜单。需要确认时可直接在气泡内审批主任务和子任务。
+6. 右上角「召唤龙娘」或 `Ctrl + Alt + D` 显示/收起桌宠。原来的外观、动画和手势保留：单击看回复、双击看 Codex 额度、聊天按钮输入、拖动移动、右键菜单。气泡默认简约输入，右上角「详细」展开聊天、附件和设置；「简约」可收回，并记住选择。待确认提示可直接打开详细版审批主任务和子任务。
 
-Codex 是可选的外部通道：在设置中登录账号后，通过模型菜单中的「Codex」页签选择模型，并用滑条调节该模型支持的推理强度。最高档有短暂光晕动画。模型与强度在当前会话保存；其上下文策略独立；动态文件、浏览器和 MCP 工具直接接入 Dragon 工具层。关闭工作台会收进托盘，任务继续；托盘右键可退出应用。
+Codex 是可选的外部通道：在设置中登录账号后，通过模型菜单中的「Codex」页签选择模型，在模型旁的推理强度按钮中，用红色滑条调节该模型支持的档位；右上角重置恢复该模型默认强度。最高档有短暂光晕动画。模型与强度在当前会话保存；其上下文策略独立；动态文件、浏览器和 MCP 工具直接接入 Dragon 工具层。关闭工作台会收进托盘，任务继续；托盘右键可退出应用。
 
 同一 Dragon 聊天可在任务结束后直接更换模型，历史和草稿保留；跨 Codex / Dragon 通道会携带可审核摘录创建新聊天。权限说明位于权限菜单各选项中。
 
@@ -80,4 +84,4 @@ Codex 是可选的外部通道：在设置中登录账号后，通过模型菜�
 
 Electron 界面测试请从正常 Windows 用户环境运行；受限账号的 AppContainer 权限可能导致 Electron 在创建窗口前异常退出。发行包不含测试数据、账号、密钥或浏览器用户目录。
 
-本地模拟验收和真实在线验收分开记录，见 `docs/RELEASE-0.2.3.md` 和 `docs/ACCEPTANCE.md`。本地模拟通过不代表在线服务已验收，具体状态以记录为准。
+本地模拟验收和真实在线验收分开记录，见 `docs/RELEASE-0.2.4.md` 和 `docs/ACCEPTANCE.md`。本地模拟通过不代表在线服务已验收，具体状态以记录为准。

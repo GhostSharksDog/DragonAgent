@@ -1,4 +1,6 @@
 import { EventEmitter } from 'node:events';
+import { DatabaseSync } from 'node:sqlite';
+import { existsSync } from 'node:fs';
 import packageInfo from '../../package.json';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -42,6 +44,22 @@ export class Runtime extends EventEmitter {
   changed(persist = true) { if (persist) this.store.save(this.state); this.view.revision++; this.emit('change'); }
   session(id: string) { const value = this.state.sessions.find(s => s.id === id); if (!value) throw new Error('会话不存在。'); return value; }
   idleSettings() { if (this.state.sessions.some(isBusy)) throw new Error('请先停止正在执行的任务，再修改连接设置。'); }
+  async cleanDeletedSessions() {
+    for (const id of [...(this.state.pendingSessionDeletes ?? [])]) {
+      const filename = path.join(this.options.home, 'agent-core.db');
+      if (existsSync(filename)) {
+        const db = new DatabaseSync(filename);
+        try {
+          db.exec('PRAGMA busy_timeout=5000; BEGIN IMMEDIATE');
+          for (const table of ['agents', 'events', 'attachments']) db.prepare(`DELETE FROM ${table} WHERE session_id=?`).run(id);
+          db.exec('COMMIT');
+        } finally { db.close(); }
+      }
+      await this.attachments.deleteSession(id);
+      this.state.pendingSessionDeletes = (this.state.pendingSessionDeletes ?? []).filter(v => v !== id);
+      this.store.save(this.state);
+    }
+  }
   create(backend: 'dragon' | 'codex', profileId = this.state.settings.selectedProfile, workspace = '', carryFrom?: string, codex?: { model: string; effort?: string }) {
     const s: AgentSession = { id: randomUUID(), title: '新的对话', backend, profileId, workspace, draft: '', permissionMode: 'ask', draftAttachments: [], createdAt: Date.now(), updatedAt: Date.now(), status: 'idle', messages: [], tools: [], pending: [], origins: [], browserInput: false, terminalEnabled: false };
     if (carryFrom) {
@@ -100,6 +118,22 @@ export class Runtime extends EventEmitter {
       case 'session.create': return this.create(action.backend, action.profileId, action.workspace, action.carryFrom, action.backend === 'codex' && action.model ? await this.codexChoice(action.model, action.reasoningEffort) : undefined);
       case 'session.select': this.session(action.id); this.state.selectedSessionId = action.id; break;
       case 'session.archive': { const s = this.session(action.id); if (isBusy(s)) throw new Error('请先停止此任务。'); s.archived = true; if (this.state.selectedSessionId === s.id) this.state.selectedSessionId = null; break; }
+      case 'session.delete': {
+        const s = this.state.sessions.find(s => s.id === action.id);
+        if (!s) return true; // Repeated requests from another window are harmless.
+        if (isBusy(s) || this.runs.has(s.id) || this.attaching.has(s.id)) throw new Error('请先停止任务，并等待附件处理完成后删除。');
+        this.state.sessions = this.state.sessions.filter(v => v.id !== s.id);
+        if (this.state.selectedSessionId === s.id) this.state.selectedSessionId = this.state.sessions.find(v => !v.archived)?.id ?? null;
+        this.state.pendingSessionDeletes = [...(this.state.pendingSessionDeletes ?? []), s.id];
+        this.changed(); // Persist deletion before cleanup, so a crash cannot restore the conversation.
+        try { await this.cleanDeletedSessions(); }
+        catch { throw new Error('对话已删除，本地缓存清理未完成；下次启动会重试。'); }
+        return true;
+      }
+      case 'pet.chatMode': {
+        if (!['simple', 'detailed'].includes(action.mode)) throw new Error('无效的聊天视图。');
+        this.state.settings.pet.chatMode = action.mode; break;
+      }
       case 'session.draft': this.session(action.id).draft = action.text.slice(0, 200000); break;
       case 'session.send': this.send(action.id, action.text, action.commandId); return;
       case 'session.stop': await this.stop(action.id); return;
