@@ -1,0 +1,76 @@
+{
+  "name": "dragon-agent",
+  "version": "0.2.3",
+  "private": true,
+  "description": "银白龙娘 · TypeScript 桌面 Agent 工作台",
+  "main": "dist/main/index.cjs",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && node scripts/build.mjs",
+    "start": "electron .",
+    "dev": "npm run build && npm start",
+    "test": "tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "test:ui": "node scripts/ui-check.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "prepare:runtime": "tsx scripts/prepare-runtime.ts",
+    "package": "npm run build && npm run prepare:runtime && node scripts/stage.mjs && npm ci --omit=dev --ignore-scripts --prefix .cache/package-app --cache .cache/npm && node scripts/package.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@playwright/mcp": "0.0.83",
+    "ajv": "8.20.0",
+    "mammoth": "1.13.0",
+    "pdf-parse": "2.4.5",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "electron": "45.0.0",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vite": "8.3.5"
+  },
+  "build": {
+    "asar": false,
+    "electronDist": "node_modules/electron/dist",
+    "appId": "local.dragonagent.desktop",
+    "productName": "DragonAgent",
+    "directories": {
+      "output": "release/0.2.3"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/**/*.node",
+      "node_modules/playwright*/**/*",
+      "node_modules/@playwright/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "signAndEditExecutable": true,
+      "icon": "dist/assets/branding/dragon.ico",
+      "signExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "DragonAgent-Setup-${version}.${ext}"
+    }
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

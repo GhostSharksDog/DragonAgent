@@ -1,0 +1,29 @@
+{
+  "appId": "local.dragonagent.desktop",
+  "productName": "DragonAgent",
+  "asar": false,
+  "npmRebuild": false,
+  "electronVersion": "45.0.0",
+  "electronDist": "../../node_modules/electron/dist",
+  "directories": {
+    "output": "../../release/0.2.3"
+  },
+  "files": [
+    "dist/**/*",
+    "package.json"
+  ],
+  "win": {
+    "target": [
+      "nsis",
+      "zip"
+    ],
+    "signAndEditExecutable": true,
+    "icon": "dist/assets/branding/dragon.ico",
+    "signExecutable": false
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "artifactName": "DragonAgent-Setup-${version}.${ext}"
+  }
+}

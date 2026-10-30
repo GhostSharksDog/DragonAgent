@@ -1,0 +1,11 @@
+import { cp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import path from 'node:path';
+const original = JSON.parse(await readFile('package.json', 'utf8'));
+const target = path.resolve('.cache/package-app');
+if (!target.startsWith(process.cwd() + path.sep)) throw new Error('Invalid staging path');
+await rm(path.join(target, 'dist'), { recursive: true, force: true });
+await mkdir(target, { recursive: true });
+await writeFile(`${target}/package.json`, JSON.stringify({ name: original.name, version: original.version, description: original.description, author: 'DragonAgent', private: true, type: 'module', main: original.main, dependencies: original.dependencies }, null, 2));
+await cp('dist', `${target}/dist`, { recursive: true });
+await cp('runtime-package-lock.json', `${target}/package-lock.json`);
+console.log('Staged runtime-only app.');

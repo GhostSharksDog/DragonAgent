@@ -1,0 +1,28 @@
+{
+  "name": "@dragon-agent/core",
+  "version": "0.2.1",
+  "private": true,
+  "type": "module",
+  "description": "Standalone TypeScript agent loop, scoped tools, MCP and child-agent coordination",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./sqlite": {
+      "types": "./dist/sqlite-store.d.ts",
+      "import": "./dist/sqlite-store.js"
+    }
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "ajv": "8.20.0"
+  }
+}

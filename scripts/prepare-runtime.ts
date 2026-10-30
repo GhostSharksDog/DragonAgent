@@ -1,0 +1,14 @@
+import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { resolveCodex, CODEX_VERSION } from '../src/pet/main/agent/transport';
+const version = JSON.parse(await readFile('package.json', 'utf8')).version;
+const executable = await resolveCodex();
+const vendor = path.dirname(path.dirname(executable));
+const packageInfo = JSON.parse(await readFile(path.join(vendor, 'codex-package.json'), 'utf8'));
+await mkdir('dist/runtime', { recursive: true });
+await cp(vendor, 'dist/runtime/codex', { recursive: true });
+await mkdir('dist/licenses', { recursive: true });
+await cp('node_modules/@modelcontextprotocol/sdk/LICENSE', 'dist/licenses/MCP-SDK-MIT.txt');
+await cp('node_modules/.pnpm/node_modules/playwright-core/LICENSE', 'dist/licenses/Apache-2.0.txt');
+await writeFile('dist/licenses/NOTICE.txt', `DragonAgent ${version}\nIndependent TypeScript Agent core. No DeepSeek Harness runtime dependency.\nCodex CLI ${CODEX_VERSION}: Apache-2.0; https://github.com/openai/codex\nPlaywright: Apache-2.0; https://github.com/microsoft/playwright\nMCP TypeScript SDK: MIT; https://github.com/modelcontextprotocol/typescript-sdk\nElectron and Chromium: see LICENSE and LICENSES.chromium.html in application root.\nSilver dragon assets and renderer reused from the user's local dragon-pet project, unchanged.\nBundled Codex package metadata: ${JSON.stringify(packageInfo)}\n`);
+console.log(`Prepared native Codex ${CODEX_VERSION} and runtime notices.`);

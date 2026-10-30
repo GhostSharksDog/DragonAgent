@@ -1,0 +1,43 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { HttpModelAdapter, serialize, type ModelRequest } from '../packages/agent-core/src';
+function request(protocol: ModelRequest['profile']['protocol']): ModelRequest { return { profile: { id: 'p', model: 'm', protocol, baseUrl: 'https://example.test/v1', contextWindow: 65536, maxOutput: 4096 }, key: 'secret', messages: [{ role: 'user', text: '你好' }], tools: [], maxOutput: 4096, signal: new AbortController().signal, onText() {} }; }
+function stream(events: any[], fragment = 3) { const bytes = new TextEncoder().encode(events.map(e => `data: ${JSON.stringify(e)}\r\n\r\n`).join('')); return new Response(new ReadableStream({ start(c) { for (let i = 0; i < bytes.length; i += fragment) c.enqueue(bytes.slice(i, i + fragment)); c.close(); } }), { headers: { 'Content-Type': 'text/event-stream' } }); }
+test('Chat Completions handles UTF-8 fragments, multiple tools, reasoning and usage', async () => {
+  const adapter = new HttpModelAdapter(async () => stream([{ choices: [{ delta: { content: '你好', reasoning_content: 'private', tool_calls: [{ index: 0, id: 'a', function: { name: 'one', arguments: '{"a":' } }, { index: 1, id: 'b', function: { name: 'two', arguments: '{}' } }] } }] }, { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '1}' } }] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 30, completion_tokens: 8 } }]));
+  const r = await adapter.generate(request('openai-completions')); assert.equal(r.message.text, '你好'); assert.equal(r.message.calls?.length, 2); assert.equal(r.message.calls?.[0].arguments, '{"a":1}'); assert.equal(r.usage.input, 30);
+  const follow = request('openai-completions'); follow.messages.push(r.message); assert.equal((serialize(follow).body.messages as any[])[1].reasoning_content, 'private');
+  follow.profile.baseUrl = 'https://other.test/v1'; assert.equal((serialize(follow).body.messages as any[])[1].reasoning_content, undefined);
+});
+test('Responses preserves native call ids and encrypted reasoning continuation', async () => {
+  const item = { type: 'function_call', id: 'fc_item', call_id: 'call_real', name: 'read', arguments: '{"path":"x"}' };
+  const native = [{ type: 'reasoning', id: 'reason', encrypted_content: 'opaque' }, item];
+  const adapter = new HttpModelAdapter(async () => stream([{ type: 'response.output_item.added', output_index: 1, item: { ...item, arguments: '' } }, { type: 'response.function_call_arguments.delta', output_index: 1, delta: '{"path":' }, { type: 'response.function_call_arguments.delta', output_index: 1, delta: '"x"}' }, { type: 'response.output_item.done', output_index: 1, item }, { type: 'response.completed', response: { output: native, usage: { input_tokens: 9, output_tokens: 4 } } }]));
+  const r = await adapter.generate(request('openai-responses')); assert.equal(r.message.calls![0].id, 'call_real'); const next = request('openai-responses'); next.messages.push(r.message, { role: 'tool', text: 'value', callId: 'call_real' }); const input = serialize(next).body.input as any[]; assert(input.some(i => i.encrypted_content === 'opaque')); assert(input.some(i => i.call_id === 'call_real' && i.type === 'function_call_output'));
+});
+test('Anthropic assembles split JSON and signed thinking with cache usage', async () => {
+  const adapter = new HttpModelAdapter(async () => stream([{ type: 'message_start', message: { usage: { input_tokens: 8, cache_read_input_tokens: 12 } } }, { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '', signature: '' } }, { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'private' } }, { type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'sig' } }, { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'tool1', name: 'read', input: {} } }, { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"x":' } }, { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '1}' } }, { type: 'content_block_stop', index: 1 }, { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 7 } }, { type: 'message_stop' }]));
+  const r = await adapter.generate(request('anthropic-messages')); assert.equal(r.usage.input, 20); assert.equal(r.message.calls![0].arguments, '{"x":1}'); const next = request('anthropic-messages'); next.messages.push(r.message, { role: 'tool', callId: 'tool1', text: 'ok' }); const body = serialize(next).body as any; assert.equal(body.messages[1].content[0].signature, 'sig'); assert.equal(body.messages[2].content[0].tool_use_id, 'tool1');
+});
+test('HTTP errors, interrupted streams, invalid JSON and cancellation fail loudly', async () => {
+  await assert.rejects(new HttpModelAdapter(async () => new Response('', { status: 401 })).generate(request('openai-completions')), /HTTP 401/);
+  await assert.rejects(new HttpModelAdapter(async () => stream([{ choices: [{ delta: { content: 'partial' } }] }])).generate(request('openai-completions')), /完成前断开/);
+  await assert.rejects(new HttpModelAdapter(async () => new Response('data: invalid\n\n')).generate(request('openai-completions')), /无效/);
+  const controller = new AbortController(), req = request('openai-completions'); req.signal = controller.signal;
+  const promise = new HttpModelAdapter(async () => new Response(new ReadableStream({ start() {} }))).generate(req); setTimeout(() => controller.abort(), 10); await assert.rejects(promise);
+});
+
+for (const protocol of ['openai-completions', 'openai-responses', 'anthropic-messages'] as const) {
+  test(`${protocol}: text streaming, multiple calls, usage, error and cancellation`, async () => {
+    const events = protocol === 'openai-completions' ? [{ choices: [{ delta: { content: 'text', tool_calls: [0, 1].map(index => ({ index, id: `c${index}`, function: { name: `t${index}`, arguments: '{"x":' } })) } }] }, { choices: [{ delta: { tool_calls: [0, 1].map(index => ({ index, function: { arguments: '1}' } })) }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 5 } }]
+      : protocol === 'openai-responses' ? [{ type: 'response.output_text.delta', delta: 'text' }, ...[0, 1].flatMap(index => [{ type: 'response.output_item.added', output_index: index, item: { type: 'function_call', call_id: `c${index}`, name: `t${index}`, arguments: '' } }, { type: 'response.function_call_arguments.delta', output_index: index, delta: '{"x":' }, { type: 'response.function_call_arguments.delta', output_index: index, delta: '1}' }]), { type: 'response.completed', response: { usage: { input_tokens: 10, output_tokens: 5 } } }]
+      : [{ type: 'message_start', message: { usage: { input_tokens: 10 } } }, { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }, { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'text' } }, ...[1, 2].flatMap(index => [{ type: 'content_block_start', index, content_block: { type: 'tool_use', id: `c${index}`, name: `t${index}`, input: {} } }, { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: '{"x":' } }, { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: '1}' } }, { type: 'content_block_stop', index }]), { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }];
+    const req = request(protocol), text: string[] = []; req.onText = t => text.push(t);
+    const r = await new HttpModelAdapter(async () => stream(events)).generate(req); assert.equal(text.join(''), 'text'); assert.equal(r.message.calls!.length, 2); assert(r.message.calls!.every(c => c.arguments === '{"x":1}')); assert.deepEqual(r.usage, { input: 10, output: 5 });
+    await assert.rejects(new HttpModelAdapter(async () => new Response('', { status: 500 })).generate(request(protocol)), /HTTP 500/);
+    await assert.rejects(new HttpModelAdapter(async () => stream([{ type: 'error', error: { message: 'fixture' } }])).generate(request(protocol)), /失败/);
+    const abort = new AbortController(), pending = new HttpModelAdapter(async () => new Response(new ReadableStream({ start() {} }))).generate({ ...req, signal: abort.signal }); setTimeout(() => abort.abort(), 10); await assert.rejects(pending);
+    const imageReq = request(protocol); imageReq.messages.push(r.message, ...r.message.calls!.map(c => ({ role: 'tool' as const, callId: c.id, text: 'image', images: ['data:image/png;base64,AA=='] })));
+    assert(JSON.stringify(serialize(imageReq).body).includes('AA=='));
+  });
+}
