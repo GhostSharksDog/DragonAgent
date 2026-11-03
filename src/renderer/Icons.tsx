@@ -1,6 +1,17 @@
 import React from 'react';
 export function Icon({ name, size = 20 }: { name: string; size?: number }) {
   const paths: Record<string, React.ReactNode> = {
+    film: <><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 4v16M17 4v16M3 8h4m-4 8h4m10-8h4m-4 8h4"/><path d="m10 9 4 3-4 3Z"/></>,
+    motion: <><circle cx="15" cy="4" r="2"/><path d="m12 8 4 3 4 1m-8-4-3 4-5 1m8-5 1 7-6 6m6-6 5 1 2 5M2 6h5M1 18h3"/></>,
+    image: <><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 4-6 5 7"/></>,
+    upload: <><path d="M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6"/></>,
+    download: <><path d="M12 3v13m-5-5 5 5 5-5M4 15v6h16v-6"/></>,
+    back: <path d="m14 6-6 6 6 6"/>,
+    play: <path d="m7 4 14 8-14 8Z"/>,
+    pause: <><path d="M8 4v16M16 4v16" strokeWidth="3"/></>,
+    clock: <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></>,
+    info: <><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></>,
+    alert: <><path d="m12 3 10 18H2Z"/><path d="M12 9v5M12 17h.01"/></>,
     trash: <><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></>,
     lightning: <path d="m13 2-9 12h7l-1 8 10-13h-7Z"/>,
     reset: <path d="M4 10a8 8 0 1 1 1 8M4 4v6h6"/>,

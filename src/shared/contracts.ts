@@ -1,4 +1,5 @@
 import type { SkinData, QuotaSnapshot } from '../pet/shared/types';
+import type { WorkshopAction, WorkshopSnapshot } from './workshop';
 
 export const CONTEXT_LIMIT = 524_288;
 export type BackendKind = 'dragon' | 'codex';
@@ -48,7 +49,8 @@ export interface BackendState { state: 'stopped' | 'starting' | 'ready' | 'error
 export interface Snapshot {
   codexCatalog: CodexCatalog;
   resolvedTheme: 'light' | 'dark';
-  workbenchPage?: 'chat' | 'settings';
+  workbenchPage?: 'chat' | 'settings' | 'workshop';
+  workshop?: WorkshopSnapshot;
   workbenchPageRevision?: number;
   revision: number; settings: AppSettings; sessions: AgentSession[]; selectedSessionId: string | null;
   memory: MemoryFact[]; backends: { dragon: BackendState; codex: BackendState };
@@ -68,7 +70,7 @@ export interface AgentBackend {
   cancel(session: AgentSession): Promise<void>;
   dispose(): Promise<void>;
 }
-export type Action =
+export type Action = WorkshopAction
   | { type: 'codex.models' }
   | { type: 'session.codexModel'; id: string; model: string; effort?: string }
   | { type: 'session.model'; id: string; profileId: string }
@@ -101,7 +103,7 @@ export type Action =
   | { type: 'pet.view'; view: Snapshot['petView'] }
   | { type: 'pet.chatMode'; mode: 'simple' | 'detailed' }
   | { type: 'pet.drag'; dx: number; dy: number }
-  | { type: 'window.workbench'; page?: 'chat' | 'settings' }
+  | { type: 'window.workbench'; page?: 'chat' | 'settings' | 'workshop' }
   | { type: 'window.menu' }
   | { type: 'quota.refresh' }
   | { type: 'codex.login' }

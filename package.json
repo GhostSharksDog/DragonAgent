@@ -1,6 +1,6 @@
 {
   "name": "dragon-agent",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "private": true,
   "description": "银白龙娘 · TypeScript 桌面 Agent 工作台",
   "main": "dist/main/index.cjs",
@@ -23,12 +23,15 @@
     "mammoth": "1.13.0",
     "pdf-parse": "2.4.5",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "sharp": "^0.35.5",
+    "yazl": "^3.3.1"
   },
   "devDependencies": {
     "@types/node": "24.10.0",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "@types/yazl": "^3.3.1",
     "electron": "45.0.0",
     "electron-builder": "26.15.3",
     "esbuild": "0.28.2",
@@ -42,7 +45,7 @@
     "appId": "local.dragonagent.desktop",
     "productName": "DragonAgent",
     "directories": {
-      "output": "release/0.2.4"
+      "output": "release/0.3.0"
     },
     "files": [
       "dist/**/*",

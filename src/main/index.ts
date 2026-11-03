@@ -7,11 +7,14 @@ import { Runtime } from './runtime';
 import { loadSkin } from '../pet/main/skin';
 import type { Action } from '../shared/contracts';
 import { isBusy } from '../shared/contracts';
+import { WorkshopManager } from './workshop/manager';
+import type { WorkshopAction } from '../shared/workshop';
 
-protocol.registerSchemesAsPrivileged([{ scheme: 'pet-skin', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
+protocol.registerSchemesAsPrivileged(['pet-skin', 'workshop'].map(scheme => ({ scheme, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } })));
 if (process.env.DRAGON_DATA_DIR) app.setPath('userData', path.resolve(process.env.DRAGON_DATA_DIR));
 else app.setPath('userData', path.join(app.getPath('appData'), 'DragonAgent'));
 let runtime: Runtime, workbench: BrowserWindow, pet: BrowserWindow, bubble: BrowserWindow, tray: Tray;
+let workshop: WorkshopManager;
 let quitting = false;
 const windows = new Set<BrowserWindow>();
 const root = path.resolve(__dirname, '..');
@@ -59,6 +62,16 @@ function menu() { Menu.buildFromTemplate([{ label: '打开 DragonAgent', click: 
 async function action(value: Action) {
   if (!value || typeof value !== 'object' || typeof value.type !== 'string') throw new Error('无效操作。');
   switch (value.type) {
+    case 'workshop.upload': {
+      const result = await dialog.showOpenDialog(workbench, { title: '选择完整角色立绘', properties: ['openFile'], filters: [{ name: '角色图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] });
+      if (!result.canceled) return workshop.upload(value.id, result.filePaths[0]); return false;
+    }
+    case 'workshop.export': {
+      const project = workshop.state.projects.find(p => p.id === value.id);
+      if (!project) throw new Error('制作项目不存在。');
+      const result = await dialog.showSaveDialog(workbench, { title: '导出桌宠动画包', defaultPath: `${project.name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')}.zip`, filters: [{ name: '桌宠动画包', extensions: ['zip'] }] });
+      if (!result.canceled && result.filePath) return workshop.export(value.id, result.filePath); return false;
+    }
     case 'window.workbench': if (value.page) { runtime.view.workbenchPage = value.page; runtime.view.workbenchPageRevision = (runtime.view.workbenchPageRevision ?? 0) + 1; runtime.changed(false); } showWorkbench(); return;
     case 'window.menu': menu(); return;
     case 'external.open': return open(value.url);
@@ -84,7 +97,7 @@ async function action(value: Action) {
       const result = await dialog.showOpenDialog(workbench, { title: '选择 Legacy SQLite 数据库（只读导入）', filters: [{ name: 'SQLite', extensions: ['db', 'sqlite', 'sqlite3'] }], properties: ['openFile'] });
       if (result.canceled) return; const imported = importLegacy(result.filePaths[0], runtime.state); runtime.changed(); return imported;
     }
-    default: { const result = await runtime.action(value); if (value.type === 'settings.save' || value.type === 'pet.chatMode') syncWindows(); return result; }
+    default: { if (value.type.startsWith('workshop.') || value.type === 'skin.select') return workshop.action(value as WorkshopAction); const result = await runtime.action(value); if (value.type === 'settings.save' || value.type === 'pet.chatMode') syncWindows(); return result; }
   }
 }
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -100,6 +113,17 @@ else {
     if (!runtime.state.settings.codexPath && app.isPackaged) runtime.state.settings.codexPath = path.join(root, 'runtime/codex/bin/codex.exe');
     const skins = path.join(root, 'assets/skins/silver-dragon-frames');
     runtime.view.skin = await loadSkin(path.join(skins, 'skin.json'));
+    workshop = new WorkshopManager({ home, workerPath: path.join(root, 'main/workshop-worker.cjs'), bundledSkin: path.join(skins, 'skin.json'),
+      changed: () => { runtime.view.workshop = workshop.snapshot(); runtime.changed(false); },
+      skin: skin => { runtime.view.skin = skin; runtime.view.animationStartedAt = Date.now(); },
+      profiles: () => runtime.state.settings.profiles, key: id => runtime.secrets.get(id),
+    });
+    runtime.view.workshop = workshop.snapshot();
+    await workshop.init();
+    protocol.handle('workshop', async request => {
+      try { const u = new URL(request.url); return await net.fetch(pathToFileURL(await workshop.asset(u.hostname, u.pathname)).href); }
+      catch { return new Response('Asset not found', { status: 404 }); }
+    });
     protocol.handle('pet-skin', request => {
       const u = new URL(request.url), relative = decodeURIComponent(u.pathname).replace(/^\/+/, '');
       const target = path.resolve(skins, relative);
@@ -131,4 +155,4 @@ else {
   }).catch(error => { console.error(error); dialog.showErrorBox('DragonAgent 启动失败', String(error.message)); app.exit(1); });
 }
 app.on('window-all-closed', () => undefined);
-app.on('before-quit', event => { if (quitting) return; event.preventDefault(); quitting = true; globalShortcut.unregisterAll(); void runtime?.dispose().finally(() => { tray?.destroy(); app.quit(); }); });
+app.on('before-quit', event => { if (quitting) return; event.preventDefault(); quitting = true; globalShortcut.unregisterAll(); void (async () => { try { await workshop?.dispose(); } finally { await runtime?.dispose(); } })().finally(() => { tray?.destroy(); app.quit(); }); });

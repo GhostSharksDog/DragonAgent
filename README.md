@@ -1,8 +1,16 @@
-# DragonAgent 0.2.4
+# DragonAgent 0.3.0
 
 银白龙娘主题的 Windows 桌面 Agent。**独立 TypeScript 执行内核；DSH 只作为架构参考，没有 DSH SDK、服务或运行依赖。** 工作台与原版龙娘共享聊天、草稿、任务和审批。
 
 最近对话右侧的垃圾桶可删除聊天；「记忆与历史 → 全部历史对话」也能删除已归档聊天。确认后清理本应用对话、任务记录和附件副本；工作文件、独立记忆、其他对话中的摘录以及 Codex 原生历史保留。执行中需先停止任务。
+
+## 创作工坊
+
+侧栏新增「创作工坊」，从文字或角色立绘制作 11 项透明桌宠动作。支持本地 ComfyUI 调度、逐项重做、版本对比、背景预览、PNG 图集与 ZIP 导出，以及一键应用和恢复原版龙娘。准备环境与详细使用见 [创作工坊指南](docs/CREATIVE-STUDIO.md)。ComfyUI 与模型单独安装，应用包不包含模型权重。
+
+![创作工坊](docs/screenshots/workshop-home-light.png)
+
+本版真实 ComfyUI 成片尚待环境准备后验收；截图中的制作记录是协议模拟素材。详见 [0.3.0 发行与验收记录](docs/RELEASE-0.3.0.md)。
 
 ## 界面
 
@@ -16,9 +24,9 @@
 
 下载对应版本的安装包，或完整解压便携 ZIP 后运行 `DragonAgent.exe`。模型 API 与 Codex 登录在本机配置，仓库不包含账号数据。
 
-本机直接双击 `E:\Projects\DragonAgent\release\win-unpacked\DragonAgent.exe`。这是已更新到 0.2.4 的固定启动入口，仍使用原应用数据目录。
+本机直接双击 `E:\Projects\DragonAgent\release\win-unpacked\DragonAgent.exe`。这是已更新到 0.3.0 的固定启动入口，仍使用原应用数据目录。
 
-安装包与便携 ZIP 在 `release/0.2.4`：可运行 `DragonAgent-Setup-0.2.4.exe` 安装，或将 `DragonAgent-0.2.4-win.zip` 完整解压后运行其中的 `DragonAgent.exe`。请保留可执行文件旁的资源目录。桌面使用不需要安装 Node 或 Python。网页操作需要 Google Chrome。
+安装包与便携 ZIP 在 `release/0.3.0`：可运行 `DragonAgent-Setup-0.3.0.exe` 安装，或将 `DragonAgent-0.3.0-win.zip` 完整解压后运行其中的 `DragonAgent.exe`。请保留可执行文件旁的资源目录。Agent 与桌宠播放不需要另装 Node 或 Python；可选的本地 AI 制作功能使用独立安装的 ComfyUI 环境。网页操作需要 Google Chrome。
 
 1. 在「设置 → 模型 API」添加服务地址、模型 ID、API Key 和服务商实际提供的上下文窗口。支持 Chat Completions、Responses、Anthropic Messages。
 2. 新建聊天，在输入框右下角的模型按钮中选择「其他模型」下的 API 配置，选择工作文件夹，然后发送任务。模型按需要调用文件、浏览器、命令、MCP 或子 Agent 工具。
@@ -67,11 +75,14 @@ Codex 是可选的外部通道：在设置中登录账号后，通过模型菜�
 - `src/main/codex.ts`：可选 Codex app-server 通道，工具直接走 Dragon。
 - `src/pet`、`assets/skins`：复用的原版龙娘和受控文件/浏览器工具。
 - `src/renderer`：银白工作台、共享气泡与协作任务树。
+- `src/main/workshop`：独立工作流存储、ComfyUI 调度、图集处理与皮肤库；CPU 图片处理运行在专用 Worker。
 
 独立运行：`node examples/node.mjs`。默认使用本地 HTTP 模型模拟器，完成两轮对话和两次工具调用，不需 Electron、真实密钥或付费请求。`--live` 使用明确设置的 `DRAGON_BASE_URL`、`DRAGON_MODEL`、`DRAGON_PROTOCOL`、`DRAGON_API_KEY`，可选 `DRAGON_CONTEXT`。`npm pack ./packages/agent-core` 可生成其他 TypeScript 项目安装的框架包。
 
 ## 验证与构建
 
+- `pnpm exec tsx scripts/workshop-check.ts`：真实 HTTP/SQLite/图片处理路径的本地 ComfyUI 协议模拟验收，不代表真实模型生成。
+- `node scripts/workshop-ui-check.mjs`：工坊浅深主题、最小窗口、100%/150% 缩放、预览及桌宠应用的 Electron 集成验收。
 - `pnpm test`：协议、并行/取消、授权、预算、压缩、冲突写入、MCP 故障与迁移恢复。
 - `node scripts/ui-check.mjs`：真实 Electron + 本地模型服务，跨窗口草稿、重复发送、审批、子任务和落盘结果；截图在 `test-results`。
 - `node scripts/compositor-check.mjs`：浅色、深色背景上的 Windows 桌面透明合成检查。两种界面测试均可通过 `DRAGON_EXE` 指定发行版入口。
@@ -84,4 +95,4 @@ Codex 是可选的外部通道：在设置中登录账号后，通过模型菜�
 
 Electron 界面测试请从正常 Windows 用户环境运行；受限账号的 AppContainer 权限可能导致 Electron 在创建窗口前异常退出。发行包不含测试数据、账号、密钥或浏览器用户目录。
 
-本地模拟验收和真实在线验收分开记录，见 `docs/RELEASE-0.2.4.md` 和 `docs/ACCEPTANCE.md`。本地模拟通过不代表在线服务已验收，具体状态以记录为准。
+本地模拟验收和真实在线验收分开记录，见 `docs/RELEASE-0.3.0.md` 和 `docs/ACCEPTANCE.md`。本地模拟通过不代表在线服务已验收，具体状态以记录为准。
