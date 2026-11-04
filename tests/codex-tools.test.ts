@@ -24,6 +24,7 @@ test('Codex aliases external names without collisions, invalid characters, or di
 test('Codex start/resume dispatch aliases back to original tools and reject unregistered calls', async () => {
   let definitions = [definition('mcp__tavily__tavily_search')];
   const requests: { method: string; params: any }[] = [], executed: string[] = [], responses: any[] = [], displayed: string[] = [];
+  const commandEvents: any[] = [];
   let round = 0;
   const backend = new CodexBackend({ home: '.', executable: () => '', tools: {
     bindTools: async () => definitions,
@@ -43,7 +44,13 @@ test('Codex start/resume dispatch aliases back to original tools and reject unre
           rpc.emit('message', { id: n * 10, method: 'item/tool/call', params: { threadId: 'native', tool: alias, arguments: { query: 'safe fixture' } } });
           rpc.emit('message', { id: n * 10 + 1, method: 'item/tool/call', params: { threadId: 'native', tool: 'mcp__tavily__tavily_search', arguments: {} } });
           rpc.emit('message', { method: 'item/started', params: { threadId: 'native', item: { id: 'event', type: 'dynamicToolCall', tool: alias, arguments: {} } } });
-          setImmediate(() => rpc.emit('message', { method: 'turn/completed', params: { threadId: 'native', turn: { id: 'turn', status: 'completed' } } }));
+          rpc.emit('message', {method:'item/started',params:{threadId:'native',item:{id:'cmd',type:'commandExecution',command:'fixture-command',cwd:'.'}}});
+          setTimeout(()=>{
+            rpc.emit('message',{method:'item/commandExecution/outputDelta',params:{threadId:'native',turnId:'old-turn',itemId:'cmd',delta:'stale'}});
+            rpc.emit('message',{method:'item/commandExecution/outputDelta',params:{threadId:'native',turnId:'turn',itemId:'cmd',delta:'live output'}});
+            rpc.emit('message',{method:'item/completed',params:{threadId:'native',item:{id:'cmd',type:'commandExecution',command:'fixture-command',cwd:'.',exitCode:1,status:'completed'}}});
+            rpc.emit('message', { method: 'turn/completed', params: { threadId: 'native', turn: { id: 'turn', status: 'completed' } } });
+          },170);
         });
         return { turn: { id: 'turn' } };
       }
@@ -52,12 +59,17 @@ test('Codex start/resume dispatch aliases back to original tools and reject unre
     return { rpc, child: { stdin: pipe, stdout: pipe, stderr: pipe, kill: () => {}, unref: () => {} } };
   };
   const session = { id: 'session', workspace: '', terminalEnabled: false, model: 'configured-model', reasoningEffort: 'configured-effort' } as AgentSession;
-  const hooks: BackendHooks = { text: () => {}, tool: v => displayed.push(v.name), usage: () => {}, request: async () => false, notice: () => {}, nativeId: id => { session.nativeId = id; } };
+  const hooks: BackendHooks = { text: () => {}, tool: v => v.name==='commandExecution'?commandEvents.push(v):displayed.push(v.name), usage: () => {}, request: async () => false, notice: () => {}, nativeId: id => { session.nativeId = id; } };
   await backend.run(session, 'hello', hooks, new AbortController().signal);
   definitions = [definition('mcp__other__search')];
   await backend.run(session, 'continue', hooks, new AbortController().signal);
   assert.deepEqual(executed, ['mcp__tavily__tavily_search', 'mcp__other__search']);
   assert.deepEqual(displayed, executed);
+  assert(commandEvents.some(v=>v.status==='running'&&v.result==='live output'));
+  assert.equal(commandEvents.at(-1).status,'error');
+  assert.equal(commandEvents.at(-1).exitCode,1);
+  assert.equal(commandEvents.at(-1).result,'live output');
+  assert.equal(typeof commandEvents.at(-1).startedAt,'number');
   assert.equal(responses.filter(r => r.success === false).length, 2);
   assert.equal(responses.filter(r => r.success === true).length, 2);
   const start = requests.find(r => r.method === 'thread/start')!, resume = requests.find(r => r.method === 'thread/resume')!;

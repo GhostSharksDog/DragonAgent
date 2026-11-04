@@ -20,7 +20,7 @@ const {DatabaseSync}=require('node:sqlite'); const path=require('node:path'); co
 const filename=path.join(process.env.APPDATA,'DragonAgent','dragonagent.db');
 if(fs.existsSync(filename)){ const db=new DatabaseSync(filename,{readOnly:true}); const row=db.prepare('SELECT json FROM app_state WHERE id=1').get(); const state=row?JSON.parse(row.json):{}; db.close(); if((state.sessions||[]).some(s=>['running','waiting','stopping'].includes(s.status)))throw Error('Existing app state contains unfinished tasks; review before promotion.'); }
 const workshopFile=path.join(process.env.APPDATA,'DragonAgent','workshop','workshop.db');
-if(fs.existsSync(workshopFile)){ const db=new DatabaseSync(workshopFile,{readOnly:true}); const projects=db.prepare('SELECT json FROM projects').all().map(row=>JSON.parse(row.json)); db.close(); if(projects.some(p=>['character','queued','running','stopping'].includes(p.status)||p.operation))throw Error('Creative Studio has an active or unresolved generation task; finish or resolve it before promotion.'); }
+if(fs.existsSync(workshopFile)){ const db=new DatabaseSync(workshopFile,{readOnly:true}); const projects=db.prepare('SELECT json FROM projects').all().map(row=>JSON.parse(row.json)); db.close(); if(projects.some(p=>p.assistant?.status==='running'||p.download?.state==='running'||['character','queued','running','stopping'].includes(p.status)||p.operation))throw Error('Creative Studio has an active or unresolved generation task; finish or resolve it before promotion.'); }
 '@
 & node -e $idleCheck
 if ($LASTEXITCODE -ne 0) { throw 'Could not confirm the existing app is idle.' }

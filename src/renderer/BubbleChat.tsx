@@ -1,24 +1,17 @@
-import React, { useEffect, useState } from 'react';
-import type { Action, Snapshot, AgentSession } from '../shared/contracts';
-import { Composer } from './ComposerControls';
-import { Icon } from './Icons';
-
-export function BubbleChat({ state, session, status, conversation, act }: { state: Snapshot; session?: AgentSession; status: string; conversation: React.ReactNode; act(a: Action): Promise<unknown> }) {
-  const simple = state.settings.pet.chatMode !== 'detailed';
-  const detailed = () => void act({ type: 'pet.chatMode', mode: 'detailed' });
-  const [draft, setDraft] = useState(''), [sending, setSending] = useState(false);
-  useEffect(() => { if (session) setDraft(''); }, [session?.id]);
-  const start = async () => {
-    if (!draft.trim() || sending) return;
-    setSending(true);
-    try {
-      const id = await act({ type: 'session.create', backend: state.settings.selectedBackend ?? 'dragon', profileId: state.settings.selectedProfile });
-      if (typeof id === 'string') { await act({ type: 'session.draft', id, text: draft }); await act({ type: 'session.send', id, text: draft, commandId: crypto.randomUUID() }); }
-    } finally { setSending(false); }
-  };
-  return <>
-    <header className="bubble-header"><span><Icon name="spark" size={16}/>{simple && session?.pending.length ? <button className="bubble-attention" onClick={detailed}>{session.pending.length} 项待确认</button> : simple && (session?.messages.length || session?.error) ? <button className="bubble-status" onClick={detailed} title="展开详细对话">{session.error ? '查看错误' : status === '已完成' ? '查看回复' : status}<Icon name="chevron" size={12}/></button> : `霜璃 · ${session ? status : '我在这里'}`}</span><div className="bubble-header-actions"><button className="bubble-mode" aria-label={simple ? '切换到详细版' : '切换到简约版'} title={simple ? '查看对话、附件与模型设置' : '只保留输入框'} onClick={() => void act({ type: 'pet.chatMode', mode: simple ? 'detailed' : 'simple' })}><Icon name={simple ? 'expand' : 'collapse'} size={14}/>{simple ? '详细' : '简约'}</button><button className="plain" aria-label="打开完整工作台" title="打开完整工作台" onClick={() => void act({ type: 'window.workbench' })}><Icon name="external" size={15}/></button><button className="plain" aria-label="收起气泡" title="收起气泡" onClick={() => void act({ type: 'pet.view', view: 'hidden' })}><Icon name="close" size={15}/></button></div></header>
-    {!simple && session && conversation}
-    {session ? <Composer session={session} sessions={state.sessions} profiles={state.settings.profiles} catalog={state.codexCatalog} act={act} small simple={simple} details={detailed}/> : simple ? <div className="composer simple-composer"><textarea aria-label="发送给龙娘的消息" placeholder="想说什么？我在听…" value={draft} rows={2} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) { e.preventDefault(); void start(); } }}/><button className="send" aria-label="发送消息" title="Enter 发送，Shift+Enter 换行" disabled={!draft.trim() || sending} onClick={() => void start()}><Icon name="arrow" size={21}/></button></div> : <div className="bubble-empty"><p>开启一段对话，<br/>就可以在这里继续。</p><button className="primary" onClick={() => void act({ type: 'session.create', backend: state.settings.selectedBackend ?? 'dragon', profileId: state.settings.selectedProfile })}>新的对话</button></div>}
+import React,{useEffect,useState} from 'react';
+import type {Action,Snapshot,AgentSession} from '../shared/contracts';
+import {Icon} from './Icons';
+export function BubbleChat({state,session,status,conversation,act}:{state:Snapshot;session?:AgentSession;status:string;conversation:React.ReactNode;act(a:Action):Promise<unknown>}){
+  const simple=state.settings.pet.chatMode!=='detailed';
+  const [draft,setDraft]=useState(state.petChat?.draft??''),[sending,setSending]=useState(false);
+  useEffect(()=>{setDraft(state.petChat?.draft??'');},[state.petChat?.draft]);
+  const send=async()=>{if(sending||(!draft.trim()&&!state.petChat?.attachments?.length))return;setSending(true);try{await act({type:'pet.chat.send',text:draft,commandId:crypto.randomUUID()});}finally{setSending(false);}};
+  return <><header className="bubble-header"><strong>霜璃{status?' · '+status:''}</strong><div className="bubble-header-actions"><button className="bubble-mode" onClick={()=>void act({type:'pet.chatMode',mode:simple?'detailed':'simple'})}>{simple?'详细':'简约'}</button><button className="bubble-control" title="打开完整工作台" aria-label="打开完整工作台" onClick={async()=>{if(session)await act({type:'session.select',id:session.id});await act({type:'window.workbench',page:'chat'});}}><Icon name="external" size={20}/></button><button className="bubble-close" aria-label="收起气泡" title="收起气泡 · Esc" onClick={()=>void act({type:'pet.view',view:'hidden'})}><Icon name="close" size={20}/></button></div></header>
+    <div className="pet-chat-context"><label>当前聊天<select aria-label="龙娘当前聊天" value={session?.id??''} onChange={e=>void act({type:'pet.chat.bind',id:e.target.value||undefined,pinned:!!e.target.value})}><option value="">自动识别 · 无匹配则新建</option>{state.sessions.filter(s=>!s.readOnly&&!s.archived).map(s=><option value={s.id} key={s.id}>{s.title}</option>)}</select></label><label className="pet-pin"><input type="checkbox" checked={!!state.petChat?.pinned} disabled={!session} onChange={e=>void act({type:'pet.chat.bind',id:session?.id,pinned:e.target.checked})}/>固定</label></div>
+    {!simple&&<><div className="pet-chat-permission">权限：{session?.permissionMode==='full'?'完全放开':session?.permissionMode==='auto'?'帮我批准':'全请求批准'} · {state.petChat?.pinned?'固定聊天':'按消息自动选择'}</div>{conversation}</>}
+    {state.petChat?.notice&&<p className="pet-route-notice" role="status">{state.petChat.notice}</p>}
+    {state.petChat?.queue?.map(q=><div className="pet-queued" key={q.commandId}><span>等待发送到 {state.sessions.find(s=>s.id===q.sessionId)?.title??'原聊天'}</span><button onClick={()=>void act({type:'pet.chat.cancelQueued',commandId:q.commandId})}>取消</button></div>)}
+    {simple&&!!session?.pending.length&&<button className="bubble-attention" onClick={()=>void act({type:'pet.chatMode',mode:'detailed'})}>{session.pending.length} 项待确认</button>}
+    <div className="pet-attachment-list">{state.petChat?.attachments?.map(a=><span className="attachment-chip" key={a.id}>{a.name}<button aria-label={'移除 '+a.name} onClick={()=>void act({type:'pet.chat.removeAttachment',id:a.id})}>×</button></span>)}</div><form className="composer pet-route-composer" onSubmit={e=>{e.preventDefault();void send();}}><button type="button" className="plain" aria-label="添加参考文件" onClick={()=>void act({type:'pet.chat.pickFiles'})}><Icon name="plus" size={20}/></button><textarea aria-label="发送给龙娘的消息" placeholder="说说正在做的项目，我会接上话…" value={draft} rows={2} onChange={e=>{setDraft(e.target.value);void act({type:'pet.chat.draft',text:e.target.value});}} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&e.keyCode!==229){e.preventDefault();void send();}}}/><button className="send" aria-label="发送消息" disabled={sending||(!draft.trim()&&!state.petChat?.attachments?.length)} title="Enter 发送，Shift+Enter 换行"><Icon name="arrow" size={20}/></button></form>
   </>;
 }

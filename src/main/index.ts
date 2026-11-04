@@ -1,3 +1,5 @@
+import { siteIcon } from './favicon';
+import { civitaiNetwork } from './workshop/network';
 import { app, BrowserWindow, ipcMain, protocol, net, shell, dialog, Menu, Tray, nativeImage, globalShortcut, screen, nativeTheme } from 'electron';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -8,9 +10,10 @@ import { loadSkin } from '../pet/main/skin';
 import type { Action } from '../shared/contracts';
 import { isBusy } from '../shared/contracts';
 import { WorkshopManager } from './workshop/manager';
+import { copyFile, readFile } from 'node:fs/promises';
 import type { WorkshopAction } from '../shared/workshop';
 
-protocol.registerSchemesAsPrivileged(['pet-skin', 'workshop'].map(scheme => ({ scheme, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } })));
+protocol.registerSchemesAsPrivileged(['pet-skin', 'workshop', 'artifact', 'site-icon'].map(scheme => ({ scheme, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } })));
 if (process.env.DRAGON_DATA_DIR) app.setPath('userData', path.resolve(process.env.DRAGON_DATA_DIR));
 else app.setPath('userData', path.join(app.getPath('appData'), 'DragonAgent'));
 let runtime: Runtime, workbench: BrowserWindow, pet: BrowserWindow, bubble: BrowserWindow, tray: Tray;
@@ -22,11 +25,12 @@ const branding = path.join(root, 'assets/branding');
 async function open(url: string) { const value = new URL(url); if (!['https:', 'http:'].includes(value.protocol)) throw new Error('只允许打开网页链接。'); await shell.openExternal(value.href); }
 function createWindow(kind: 'workbench' | 'pet' | 'bubble') {
   const transparent = kind !== 'workbench';
-  const theme = runtime.view.resolvedTheme, colors = theme === 'dark' ? { background: '#24212d', symbol: '#e4ddef' } : { background: '#fcfbfe', symbol: '#353143' };
+  const theme = runtime.view.resolvedTheme, colors = theme === 'dark' ? { background: '#24212d', symbol: '#e4ddef' } : { background: '#ffffff', symbol: '#20242e' };
   const win = new BrowserWindow({ ...(transparent ? {} : { titleBarStyle: 'hidden' as const, titleBarOverlay: { color: colors.background, symbolColor: colors.symbol, height: 48 } }), icon: path.join(branding, 'dragon.ico'), width: kind === 'workbench' ? 1260 : kind === 'pet' ? 272 : 390, height: kind === 'workbench' ? 850 : kind === 'pet' ? 296 : 460, minWidth: kind === 'workbench' ? 850 : undefined, minHeight: kind === 'workbench' ? 600 : undefined, title: 'DragonAgent', show: false, frame: !transparent, transparent, backgroundColor: transparent ? '#00000000' : colors.background, resizable: !transparent, hasShadow: !transparent, skipTaskbar: transparent, alwaysOnTop: transparent, autoHideMenuBar: true, webPreferences: { preload: path.join(root, 'main/preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true } });
   windows.add(win); win.on('closed', () => windows.delete(win));
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
+  win.webContents.on('will-frame-navigate', event => { if (!event.isMainFrame && !event.url.startsWith('artifact:')) event.preventDefault(); });
   void win.loadFile(path.join(root, 'renderer/index.html'), { query: { view: kind, theme } });
   return win;
 }
@@ -35,7 +39,12 @@ function syncTheme() {
   const configured = runtime.state.settings.theme;
   runtime.view.resolvedTheme = configured === 'system' ? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light') : configured;
   const dark = runtime.view.resolvedTheme === 'dark';
-  if (workbench && !workbench.isDestroyed() && appliedTheme !== runtime.view.resolvedTheme) { appliedTheme = runtime.view.resolvedTheme; workbench.setBackgroundColor(dark ? '#24212d' : '#fcfbfe'); workbench.setTitleBarOverlay({ color: dark ? '#24212d' : '#fcfbfe', symbolColor: dark ? '#e4ddef' : '#353143', height: 48 }); }
+  if (workbench && !workbench.isDestroyed() && appliedTheme !== runtime.view.resolvedTheme) { appliedTheme = runtime.view.resolvedTheme; workbench.setBackgroundColor(dark ? '#24212d' : '#ffffff'); workbench.setTitleBarOverlay({ color: dark ? '#24212d' : '#ffffff', symbolColor: dark ? '#e4ddef' : '#20242e', height: 48 }); }
+}
+/** 工坊快照附带“是否已保存 Civitai 密钥”，让界面能显示真实状态，而不是靠输入框是否为空来猜。 */
+function syncWorkshop() {
+  runtime.view.workshop = { ...workshop.snapshot(), civitaiKeySaved: runtime.secrets.has('workshop:civitai') };
+  runtime.changed(false);
 }
 function moveBubble() {
   const r = pet.getBounds(), area = screen.getDisplayMatching(r).workArea;
@@ -48,7 +57,7 @@ function syncWindows() {
   if (pet.getBounds().width !== size) pet.setSize(size, height);
   pet.setAlwaysOnTop(config.alwaysOnTop, 'floating'); bubble.setAlwaysOnTop(config.alwaysOnTop, 'floating');
   if (config.visible) pet.showInactive(); else pet.hide();
-  const bubbleHeight = runtime.view.petView === 'quota' || config.chatMode === 'detailed' ? 460 : 184;
+  const bubbleHeight = runtime.view.petView === 'quota' || config.chatMode === 'detailed' ? 460 : 256;
   if (bubble.getBounds().height !== bubbleHeight) {
     // Windows locks min/max bounds on non-resizable windows; unlock only for this programmatic resize.
     bubble.setResizable(true); bubble.setSize(390, bubbleHeight); bubble.setResizable(false);
@@ -62,6 +71,26 @@ function menu() { Menu.buildFromTemplate([{ label: '打开 DragonAgent', click: 
 async function action(value: Action) {
   if (!value || typeof value !== 'object' || typeof value.type !== 'string') throw new Error('无效操作。');
   switch (value.type) {
+    case 'pet.chat.pickFiles': {const result=await dialog.showOpenDialog(bubble,{title:'给龙娘添加参考文件',properties:['openFile','multiSelections']});if(!result.canceled)return runtime.action({type:'pet.chat.attach',files:result.filePaths.map(file=>({path:file,name:path.basename(file)}))});return;}
+    case 'artifact.reveal': {const item=await runtime.artifacts.resolve(runtime.session(value.sessionId),value.artifactId);shell.showItemInFolder(item.path);return true;}
+    case 'artifact.save': {
+      const item=await runtime.artifacts.resolve(runtime.session(value.sessionId),value.artifactId);
+      const result=await dialog.showSaveDialog(workbench,{defaultPath:item.name});
+      if(result.canceled||!result.filePath)return false;
+      await runtime.artifacts.resolve(runtime.session(value.sessionId),value.artifactId);
+      if(path.resolve(result.filePath).toLowerCase()!==item.path.toLowerCase())await copyFile(item.path,result.filePath);return true;
+    }
+    case 'workshop.civitai.key': {
+      const apiKey=value.apiKey.trim();
+      await runtime.secrets.set('workshop:civitai',apiKey);
+      if(await runtime.secrets.get('workshop:civitai')!==apiKey)throw new Error('密钥保存后无法读回，请重试。');
+      syncWorkshop();return true;
+    }
+    case 'workshop.civitai.clear': runtime.secrets.remove('workshop:civitai');syncWorkshop();return true;
+    case 'workshop.lora.import': {
+      const result=await dialog.showOpenDialog(workbench,{title:'选择 SDXL 角色 LoRA',properties:['openFile'],filters:[{name:'SafeTensors',extensions:['safetensors']}]});
+      if(!result.canceled)return workshop.importLora(value.id,result.filePaths[0]);return false;
+    }
     case 'workshop.upload': {
       const result = await dialog.showOpenDialog(workbench, { title: '选择完整角色立绘', properties: ['openFile'], filters: [{ name: '角色图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] });
       if (!result.canceled) return workshop.upload(value.id, result.filePaths[0]); return false;
@@ -113,16 +142,24 @@ else {
     if (!runtime.state.settings.codexPath && app.isPackaged) runtime.state.settings.codexPath = path.join(root, 'runtime/codex/bin/codex.exe');
     const skins = path.join(root, 'assets/skins/silver-dragon-frames');
     runtime.view.skin = await loadSkin(path.join(skins, 'skin.json'));
-    workshop = new WorkshopManager({ home, workerPath: path.join(root, 'main/workshop-worker.cjs'), bundledSkin: path.join(skins, 'skin.json'),
-      changed: () => { runtime.view.workshop = workshop.snapshot(); runtime.changed(false); },
+    const civitaiFetch=civitaiNetwork(()=>runtime.secrets.get('workshop:civitai'));
+    workshop = new WorkshopManager({ home, fetch: civitaiFetch, workerPath: path.join(root, 'main/workshop-worker.cjs'), bundledSkin: path.join(skins, 'skin.json'),
+      changed: () => syncWorkshop(),
       skin: skin => { runtime.view.skin = skin; runtime.view.animationStartedAt = Date.now(); },
-      profiles: () => runtime.state.settings.profiles, key: id => runtime.secrets.get(id),
+      preferences: () => runtime.state.settings.assistant, profiles: () => runtime.state.settings.profiles, key: id => runtime.secrets.get(id),
     });
-    runtime.view.workshop = workshop.snapshot();
+    syncWorkshop();
     await workshop.init();
+    protocol.handle('site-icon',async request=>{const u=new URL(request.url);if(u.hostname!=='icon')return new Response('',{status:404});const image=await siteIcon(decodeURIComponent(u.pathname.slice(1)));return image?new Response(new Uint8Array(image),{headers:{'Content-Type':'image/png','Cache-Control':'max-age=300'}}):new Response('',{status:404});});
     protocol.handle('workshop', async request => {
       try { const u = new URL(request.url); return await net.fetch(pathToFileURL(await workshop.asset(u.hostname, u.pathname)).href); }
       catch { return new Response('Asset not found', { status: 404 }); }
+    });
+    protocol.handle('artifact',async request=>{
+      try {const item=await runtime.artifacts.resource(request.url,runtime.state.sessions);
+        if(item.size>64*1024*1024)return new Response('文件过大，请另存或在系统中打开',{status:413});
+        return new Response(new Uint8Array(await readFile(item.path)),{headers:{'Content-Type':item.mime,'X-Content-Type-Options':'nosniff','Access-Control-Allow-Origin':'*','Content-Security-Policy':"default-src 'none'; script-src artifact: 'unsafe-inline'; style-src artifact: 'unsafe-inline'; img-src artifact: data:; font-src artifact:; connect-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts"}});
+      }catch{return new Response('文件已改变、移动或未登记',{status:404});}
     });
     protocol.handle('pet-skin', request => {
       const u = new URL(request.url), relative = decodeURIComponent(u.pathname).replace(/^\/+/, '');
@@ -156,3 +193,4 @@ else {
 }
 app.on('window-all-closed', () => undefined);
 app.on('before-quit', event => { if (quitting) return; event.preventDefault(); quitting = true; globalShortcut.unregisterAll(); void (async () => { try { await workshop?.dispose(); } finally { await runtime?.dispose(); } })().finally(() => { tray?.destroy(); app.quit(); }); });
+

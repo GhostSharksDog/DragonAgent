@@ -122,7 +122,7 @@ try {
   await bubble.getByRole('button', { name: '允许本次操作', exact: true }).waitFor();
   await page.screenshot({ path: 'test-results/approval.png' });
   await bubble.getByRole('button', { name: '允许本次操作', exact: true }).click();
-  await page.locator('.prose').filter({ hasText: /^已写入测试文件。$/ }).waitFor({ timeout: 30000 });
+  await page.locator('.rich-text').filter({ hasText: /^已写入测试文件。$/ }).waitFor({ timeout: 30000 });
   assert.equal(await readFile(testFile, 'utf8'), 'Approved from the dragon bubble.');
   await page.screenshot({ path: 'test-results/conversation.png' });
   await page.getByRole('button', { name: '新的对话', exact: false }).click();

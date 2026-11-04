@@ -26,7 +26,7 @@ if (existsSync(workshopFile)) {
   const workshop = new DatabaseSync(workshopFile, { readOnly: true });
   try {
     const projects = workshop.prepare('SELECT json FROM projects').all().map(row => JSON.parse(row.json));
-    assert(!projects.some(p => ['character', 'queued', 'running', 'stopping'].includes(p.status) || p.operation), 'Finish or resolve workshop tasks before replacement.');
+    assert(!projects.some(p => p.assistant?.status==='running' || p.download?.state==='running' || ['character', 'queued', 'running', 'stopping'].includes(p.status) || p.operation), 'Finish or resolve workshop tasks before replacement.');
   } finally { workshop.close(); }
 }
 await mkdir('test-results', { recursive: true });

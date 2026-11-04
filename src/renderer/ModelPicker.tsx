@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { Action, AgentSession, CodexCatalog, CodexModel, ModelProfile } from '../shared/contracts';
+import { CollaborationPicker } from './CollaborationPicker';
 import { Icon } from './Icons';
 
 const effortNames: Record<string, string> = { none: '关闭', minimal: '极低', low: '低', medium: '中等', high: '高', xhigh: '极高', max: '最高', ultra: '极致' };
@@ -7,7 +8,7 @@ export const effortLabel = (value?: string) => value ? effortNames[value] ?? val
 export function codexLabel(session: AgentSession, catalog: CodexCatalog) {
   return catalog.models.find(m => m.model === session.model)?.name ?? session.model ?? catalog.models.find(m => m.isDefault)?.name ?? 'Codex';
 }
-function ReasoningControl({ session, model, act, openModels }: { session: AgentSession; model: CodexModel; act(a: Action): Promise<unknown>; openModels(): void }) {
+export function ReasoningControl({ session, model, act, openModels, save }: { session: AgentSession; model: CodexModel; act(a: Action): Promise<unknown>; openModels(): void; save?(model:string,effort:string):Promise<unknown> }) {
   const selected = Math.max(0, model.efforts.findIndex(e => e.value === (session.reasoningEffort ?? model.defaultEffort)));
   const [index, setIndex] = useState(selected), [burst, setBurst] = useState(false), [saving, setSaving] = useState(false);
   const pending = useRef(false), timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -21,7 +22,7 @@ function ReasoningControl({ session, model, act, openModels }: { session: AgentS
   const commit = async (next: number) => {
     if (pending.current || (next === selected && session.model === model.model)) return;
     restoreFocus.current = document.activeElement as HTMLElement; pending.current = true; setSaving(true);
-    try { const ok = await act({ type: 'session.codexModel', id: session.id, model: model.model, effort: options[next].value }); if (ok === undefined) setIndex(selected); }
+    try { const ok = await (save ? save(model.model,options[next].value) : act({ type: 'session.codexModel', id: session.id, model: model.model, effort: options[next].value })); if (ok === undefined) setIndex(selected); }
     finally { pending.current = false; setSaving(false); }
   };
   const current = options[index] ?? options[selected];
@@ -45,9 +46,9 @@ export function ReasoningPicker({ session, catalog, act, openModels }: { session
   return <ReasoningControl key={current.model} session={session} model={current} act={act} openModels={openModels}/>;
 }
 export function ModelPicker({ session, profiles, catalog, act, close }: { session: AgentSession; profiles: ModelProfile[]; catalog: CodexCatalog; act(a: Action): Promise<unknown>; close(): void }) {
-  const [tab, setTab] = useState(session.backend), [choosing, setChoosing] = useState(false);
+  const [tab, setTab] = useState<'codex'|'dragon'|'collaboration'>(session.collaboration?.enabled?'collaboration':session.backend), [choosing, setChoosing] = useState(false);
   const loadRequested = useRef(false);
-  useEffect(() => { if (tab === 'codex' && !loadRequested.current) { loadRequested.current = true; void act({ type: 'codex.models' }); } }, [tab]);
+  useEffect(() => { if (tab !== 'dragon' && !loadRequested.current) { loadRequested.current = true; void act({ type: 'codex.models' }); } }, [tab]);
   const current = catalog.models.find(m => m.model === session.model) ?? (!session.model ? catalog.models.find(m => m.isDefault) : undefined);
   const choose = async (model: CodexModel) => {
     setChoosing(true);
@@ -59,8 +60,8 @@ export function ModelPicker({ session, profiles, catalog, act, close }: { sessio
     } finally { setChoosing(false); }
   };
   return <div className={`model-picker ${tab}`}>
-    <div className="model-tabs" role="tablist" aria-label="模型通道"><button role="tab" aria-selected={tab === 'codex'} onClick={() => setTab('codex')}><Icon name="model" size={16}/>Codex</button><button role="tab" aria-selected={tab === 'dragon'} onClick={() => setTab('dragon')}><Icon name="spark" size={16}/>其他模型</button></div>
-    {tab === 'codex' ? <><div className="catalog-heading"><span>CODEX MODELS</span><button aria-label="刷新 Codex 模型列表" disabled={catalog.status === 'loading'} onClick={() => void act({ type: 'codex.models' })}>刷新</button></div>
+    <div className="model-tabs" role="tablist" aria-label="模型通道"><button role="tab" aria-selected={tab === 'codex'} onClick={() => setTab('codex')}><Icon name="model" size={16}/>Codex</button><button role="tab" aria-selected={tab === 'dragon'} onClick={() => setTab('dragon')}><Icon name="spark" size={16}/>其他模型</button><button role="tab" aria-selected={tab==='collaboration'} onClick={()=>setTab('collaboration')}>协作</button></div>
+    {tab === 'collaboration' ? <CollaborationPicker session={session} profiles={profiles} catalog={catalog} act={act} close={close}/> : tab === 'codex' ? <><div className="catalog-heading"><span>CODEX MODELS</span><button aria-label="刷新 Codex 模型列表" disabled={catalog.status === 'loading'} onClick={() => void act({ type: 'codex.models' })}>刷新</button></div>
       {catalog.status === 'loading' && <p className="menu-footnote">正在读取 Codex 模型…</p>}
       {catalog.status === 'error' && <p className="catalog-error" role="alert">{catalog.error || '暂时无法读取模型列表，请刷新重试。'}</p>}
       <div className="model-catalog" role="group" aria-label="Codex 模型">{catalog.models.map(m => <button key={m.model} role="menuitemradio" aria-checked={session.backend === 'codex' && current?.model === m.model} className={`menu-option ${session.backend === 'codex' && current?.model === m.model ? 'selected' : ''}`} disabled={choosing || catalog.status !== 'ready'} title={m.description} onClick={() => void choose(m)}><span className="menu-option-icon"><Icon name="model" size={18}/></span><span className="menu-option-copy"><strong>{m.name}{m.isDefault && <em>默认</em>}</strong><small>{m.model}</small></span><span className="menu-check">{session.backend === 'codex' && current?.model === m.model && <Icon name="check" size={16}/>}</span></button>)}</div>

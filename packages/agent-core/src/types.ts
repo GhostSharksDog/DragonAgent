@@ -40,6 +40,8 @@ export interface SessionStore {
 }
 export interface ToolResult { text: string; isError?: boolean; images?: string[] }
 export interface ToolContext {
+  generate?(input: { profileId: string; messages: Message[]; maxOutput: number }): Promise<ModelResponse>;
+  callId?: string;
   agent: AgentRecord; signal: AbortSignal;
   approve(title: string, details: string): Promise<boolean>;
   question(questions: { id: string; question: string; options?: string[] }[]): Promise<Record<string, string>>;
@@ -54,7 +56,7 @@ export interface RuntimeOptions {
   profiles(): ModelProfile[]; key(profileId: string): Promise<string | undefined>;
   adapter: ModelAdapter; store: SessionStore; tools: import('./tools.js').ToolRegistry;
   event?(event: AgentEvent): void;
-  approve(agent: AgentRecord, request: { id: string; title: string; details: string }, signal: AbortSignal): Promise<boolean>;
+  approve(agent: AgentRecord, request: { id: string; title: string; details: string; callId?: string }, signal: AbortSignal): Promise<boolean>;
   question(agent: AgentRecord, questions: { id: string; question: string; options?: string[] }[], signal: AbortSignal): Promise<Record<string, string>>;
   limits?: Limits;
 }

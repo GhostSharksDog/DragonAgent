@@ -15,14 +15,15 @@ export async function comfyFixture() {
   const spec=(required={},optional={})=>({input:{required,optional}}),str=(def='')=>['STRING',{default:def}],num=(def)=>['INT',{default:def}];
   const catalog={
     LoadImage:spec({image:str()}),SaveImage:spec({images:['IMAGE'],filename_prefix:str('ComfyUI')}),ImageBatch:spec({image1:['IMAGE'],image2:['IMAGE']}),
-    CLIPTextEncode:spec({clip:['CLIP'],text:str()}),CheckpointLoaderSimple:spec({ckpt_name:[['animagine-xl-4.0.safetensors']]}),
+    LoraLoader:spec({model:['MODEL'],clip:['CLIP'],lora_name:str(),strength_model:num(.8),strength_clip:num(.8)}),
+    CLIPTextEncode:spec({clip:['CLIP'],text:str()}),CheckpointLoaderSimple:spec({ckpt_name:[['animagine-xl-4.0.safetensors','animagineXL40_v4Opt.safetensors']]}),
     EmptyLatentImage:spec({width:num(1024),height:num(1024),batch_size:num(1)}),
-    UNETLoader:spec({unet_name:[['wan2.2_ti2v_5B_fp16.safetensors']],weight_dtype:[['default']]}),
-    CLIPLoader:spec({clip_name:[['umt5_xxl_fp8_e4m3fn_scaled.safetensors']],type:[['wan']],device:[['default']]}),
-    VAELoader:spec({vae_name:[['wan2.2_vae.safetensors']]}),ModelSamplingSD3:spec({model:['MODEL'],shift:num(8)}),
+    UNETLoader:spec({unet_name:[['wan2.2_ti2v_5B_fp16.safetensors','anima-base-v1.0.safetensors']],weight_dtype:[['default']]}),
+    CLIPLoader:spec({clip_name:[['umt5_xxl_fp8_e4m3fn_scaled.safetensors','qwen_3_06b_base.safetensors']],type:[['wan','stable_diffusion']],device:[['default']]}),
+    VAELoader:spec({vae_name:[['wan2.2_vae.safetensors','qwen_image_vae.safetensors']]}),ModelSamplingSD3:spec({model:['MODEL'],shift:num(8)}),
     Wan22ImageToVideoLatent:spec({vae:['VAE'],width:num(512),height:num(512),length:num(49),batch_size:num(1)},{start_image:['IMAGE']}),
     VAEDecodeTiled:spec({samples:['LATENT'],vae:['VAE'],tile_size:num(512),overlap:num(64),temporal_size:num(16),temporal_overlap:num(4)}),
-    KSampler:spec({model:['MODEL'],positive:['CONDITIONING'],negative:['CONDITIONING'],latent_image:['LATENT'],seed:num(1),steps:num(30),cfg:num(5),sampler_name:[['uni_pc','euler_ancestral']],scheduler:[['simple','normal']],denoise:num(1)}),
+    KSampler:spec({model:['MODEL'],positive:['CONDITIONING'],negative:['CONDITIONING'],latent_image:['LATENT'],seed:num(1),steps:num(30),cfg:num(5),sampler_name:[['uni_pc','euler_ancestral','dpmpp_2m_sde_gpu']],scheduler:[['simple','normal']],denoise:num(1)}),
     BiRefNetRMBG:spec({image:['IMAGE'],model:[['BiRefNet_toonout']]},{sensitivity:num(1),mask_blur:num(0),mask_offset:num(0),invert_output:['BOOLEAN',{default:false}],refine_foreground:['BOOLEAN',{default:true}],unload_model:['BOOLEAN',{default:true}],background:[['Alpha','Color']],background_color:str('#222222')}),
   };
   const tuple=j=>[j.number,j.id,j.graph,{dragonagent:j.marker},['save']];

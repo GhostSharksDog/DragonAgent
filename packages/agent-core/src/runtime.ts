@@ -5,12 +5,12 @@ import { contextBudget, estimateTokens, historyGroups, repairInterruptedCalls } 
 import { ModelHttpError } from './adapters/http.js';
 import { BudgetExceeded, DEFAULT_LIMITS, type AgentEvent, type AgentRecord, type Grant, type Limits, type Message, type ModelProfile, type ModelResponse, type RuntimeOptions, type ToolCall, type ToolContext, type ToolResult } from './types.js';
 
-type Node = { agent: AgentRecord; controller: AbortController; done: Promise<void>; inbox: string[]; reported?: string };
+type Node = { agent: AgentRecord; controller: AbortController; done: Promise<void>; inbox: string[]; reported?: string; callId?: string };
 type Tree = { root: Node; nodes: Map<string, Node>; requests: number; limits: Limits; children: number; active: number; queue: (() => void)[] };
 const schema = (properties: Record<string, unknown>, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const string = { type: 'string' };
 export function validLimits(input: Limits): Limits {
-  for (const [key, max] of [['concurrency', 8], ['children', 100], ['requests', 1000]] as const) if (!Number.isInteger(input[key]) || input[key] < 1 || input[key] > max) throw new Error(`协作限额 ${key} 需要在 1–${max} 之间。`);
+  for (const [key, max] of [['concurrency', 8], ['children', 100], ['requests', 1000]] as const) { const min=key==='children'?0:1; if (!Number.isInteger(input[key]) || input[key] < min || input[key] > max) throw new Error(`协作限额 ${key} 需要在 ${min}–${max} 之间。`); }
   return { ...input };
 }
 const activeStates = ['queued', 'running', 'waiting'];
@@ -54,11 +54,11 @@ export class AgentRuntime {
     await this.options.store.append(event); this.options.event?.(event);
   }
   private async save(a: AgentRecord) { a.updatedAt = Date.now(); await this.options.store.putAgent(a); await this.event(a, { type: 'agent', agent: { ...structuredClone(a), messages: [] } }); }
-  private context(node: Node): ToolContext {
+  private context(node: Node, callId?: string): ToolContext {
     const { agent, controller } = node;
-    return { agent, signal: controller.signal, approve: async (title, details) => {
+    return { agent, callId:callId??node.callId, signal: controller.signal, generate: input=>this.request(this.trees.get(agent.rootId)!,node,input.messages,[],input.maxOutput,input.profileId), approve: async (title, details) => {
       const id = randomUUID(); agent.status = 'waiting'; await this.save(agent); await this.event(agent, { type: 'approval.requested', id, title, details });
-      const allowed = await this.options.approve(agent, { id, title, details }, controller.signal);
+      const allowed = await this.options.approve(agent, { id, title, details, callId: callId ?? node.callId }, controller.signal);
       await this.event(agent, { type: 'approval.resolved', id, allowed: allowed === true && !controller.signal.aborted }); controller.signal.throwIfAborted(); agent.status = 'running'; await this.save(agent); return allowed === true;
     }, question: async questions => { agent.status = 'waiting'; await this.save(agent); const answer = await this.options.question(agent, questions, controller.signal); controller.signal.throwIfAborted(); agent.status = 'running'; await this.save(agent); return answer; } };
   }
@@ -137,14 +137,15 @@ export class AgentRuntime {
       ...t, parameters: { ...t.parameters, properties: { ...t.parameters.properties as object, profileId: { type: 'string', enum: this.options.profiles().map(p => p.id), description: this.options.profiles().map(p => `${p.id}: ${p.model}`).join('; ') } } },
     } : t);
   }
-  private async request(tree: Tree, node: Node, messages: Message[], tools = this.schemas(node.agent), output?: number): Promise<ModelResponse> {
-    const profile = this.profile(node.agent.profileId), budget = contextBudget(profile); let attempts = 0;
+  private async request(tree: Tree, node: Node, messages: Message[], tools = this.schemas(node.agent), output?: number, profileId?:string): Promise<ModelResponse> {
+    const profile = this.profile(profileId??node.agent.profileId), budget = contextBudget(profile); let attempts = 0;
     while (true) {
       node.controller.signal.throwIfAborted(); if (tree.requests >= tree.limits.requests) throw new BudgetExceeded();
       tree.requests++; node.agent.requests++; await this.save(node.agent);
       try {
         const result = await this.options.adapter.generate({ profile, key: await this.options.key(profile.id), messages, tools, maxOutput: output ?? budget.output, signal: node.controller.signal, onText: text => { if (!node.controller.signal.aborted && output === undefined) this.options.event?.({ type: 'text', agentId: node.agent.id, sessionId: node.agent.sessionId, runId: node.agent.runId, time: Date.now(), text }); } });
-        node.agent.usage.input += result.usage.input; node.agent.usage.output += result.usage.output; node.agent.usage.context = result.usage.input || estimateTokens(messages, tools); node.agent.usage.window = budget.window; node.agent.usage.estimated = result.usage.estimated ?? !result.usage.input;
+        node.agent.usage.input += result.usage.input; node.agent.usage.output += result.usage.output;
+        if(!profileId){node.agent.usage.context = result.usage.input || estimateTokens(messages, tools); node.agent.usage.window = budget.window; node.agent.usage.estimated = result.usage.estimated ?? !result.usage.input;}
         await this.event(node.agent, { type: 'usage', usage: structuredClone(node.agent.usage) }); return result;
       } catch (error) {
         // Only retry HTTP failures before any stream/tool execution. Never replay a partial stream.
@@ -180,6 +181,7 @@ export class AgentRuntime {
       if (previousCall.name !== call.name || previousCall.arguments !== call.arguments) throw new Error('模型重复使用工具调用 ID，参数却已变化；已停止以避免重复操作。');
       node.agent.messages.push(structuredClone(prior)); await this.event(node.agent, { type: 'notice', text: `重复工具调用 ${call.id} 已返回已保存结果，未重复执行。` }); await this.save(node.agent); return;
     }
+    node.callId = call.id;
     await this.event(node.agent, { type: 'tool.started', call });
     let result: ToolResult;
     try {
@@ -189,6 +191,7 @@ export class AgentRuntime {
     } catch (error) { if (node.controller.signal.aborted || error instanceof BudgetExceeded) throw error; result = { text: (error as Error).message, isError: true }; }
     if (result.text.length > 16000) { const id = await this.options.store.putAttachment(node.agent.sessionId, result.text); result = { ...result, text: `完整结果已保存为附件 ${id}，共 ${result.text.length} 字符。使用 attachment_read 按需读取。\n${result.text.slice(0, 8000)}\n…\n${result.text.slice(-2000)}` }; }
     await this.event(node.agent, { type: 'tool.finished', callId: call.id, result });
+    node.callId = undefined;
     node.agent.messages.push({ role: 'tool', callId: call.id, name: call.name, text: result.text, images: result.images, isError: result.isError }); await this.save(node.agent);
   }
   private async loop(tree: Tree, node: Node) {

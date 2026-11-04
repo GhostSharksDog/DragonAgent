@@ -13,5 +13,7 @@ export class Secrets {
     if (!await safeStorage.isAsyncEncryptionAvailable()) throw new Error('无法安全保存密钥。');
     this.store.setSecret(id, await safeStorage.encryptStringAsync(value.trim()));
   }
+  /** 只检查是否存过密钥，不做解密。 */
+  has(id: string): boolean { return this.store.secret(id) !== undefined; }
   remove(id: string) { this.store.removeSecret(id); }
 }

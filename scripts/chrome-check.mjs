@@ -55,7 +55,7 @@ try {
   for (let i = 0; i < 6; i++) { await action({ type: 'session.send', id, text: `CHAIN_HISTORY_024 第${i}段资料：${'银白紫瞳龙娘界面'.repeat(360)}`, commandId: `history-${i}` }); await finish(id); }
   await textarea.fill('保留的草稿');
   const note = path.join(dir, 'draft.txt'); await writeFile(note, '草稿附件'); await app.evaluate(({ dialog }, note) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [note] }); }, note);
-  await page.getByLabel('添加文件或关联聊天').click(); await page.getByRole('menuitem', { name: '上传文件' }).click(); await page.waitForFunction(async () => { const s = await window.dragon.snapshot(); return s.sessions.find(x => x.id === s.selectedSessionId).draftAttachments.length === 1; });
+  await page.getByLabel('添加文件或关联聊天').click(); await page.getByRole('menuitem', { name: '上传图片或文件' }).click(); await page.waitForFunction(async () => { const s = await window.dragon.snapshot(); return s.sessions.find(x => x.id === s.selectedSessionId).draftAttachments.length === 1; });
   const before = (await state()).sessions.find(s => s.id === id);
   await menu('当前对话模型', /小窗口模型/); await bubble.waitForFunction(() => document.querySelector('.model-trigger')?.textContent.includes('小窗口模型'));
   const switched = (await state()).sessions.find(s => s.id === id); assert.equal(switched.draft, before.draft); assert.deepEqual(switched.draftAttachments, before.draftAttachments); assert.equal(switched.permissionMode, 'auto'); assert.equal(switched.messages.length, before.messages.length);
@@ -63,7 +63,7 @@ try {
   await action({ type: 'session.send', id, text: 'SLOW_CHECK', commandId: 'slow' }); await page.getByRole('button', { name: '停止任务' }).waitFor(); assert(await page.getByLabel('当前对话模型').isDisabled()); await assert.rejects(action({ type: 'session.delete', id }), /停止/); await assert.rejects(action({ type: 'session.model', id, profileId: 'large' }), /结束后/); await page.getByRole('button', { name: '停止任务' }).click();
   await page.waitForFunction(async id => (await window.dragon.snapshot()).sessions.find(s => s.id === id).status === 'cancelled', id);
   await textarea.fill('原聊天保留这份草稿');
-  await page.getByLabel('添加文件或关联聊天').click(); await page.getByRole('menuitem', { name: '上传文件' }).click(); await page.waitForFunction(async id => (await window.dragon.snapshot()).sessions.find(s => s.id === id).draftAttachments.length === 1, id);
+  await page.getByLabel('添加文件或关联聊天').click(); await page.getByRole('menuitem', { name: '上传图片或文件' }).click(); await page.waitForFunction(async id => (await window.dragon.snapshot()).sessions.find(s => s.id === id).draftAttachments.length === 1, id);
   await menu('当前对话模型'); await page.getByRole('tab', { name: 'Codex', exact: true }).click(); await page.getByRole('group', { name: 'Codex 模型', exact: true }).getByRole('menuitemradio').first().click(); const cross = await state(); const next = cross.sessions.find(s => s.id === cross.selectedSessionId); assert.notEqual(next.id, id); assert.equal(next.backend, 'codex'); assert.equal(next.permissionMode, 'ask'); assert(next.draft.includes('参考摘录')); assert.equal(cross.sessions.find(s => s.id === id).draft, '原聊天保留这份草稿'); assert.equal(cross.sessions.find(s => s.id === id).draftAttachments.length, 1);
   await menu('当前对话模型');
   await page.waitForFunction(async () => (await window.dragon.snapshot()).codexCatalog.status === 'ready');

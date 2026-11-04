@@ -1,6 +1,11 @@
 import React from 'react';
 export function Icon({ name, size = 20 }: { name: string; size?: number }) {
   const paths: Record<string, React.ReactNode> = {
+    refresh: <path d="M4 10a8 8 0 1 1 1 8M4 4v6h6"/>,
+    terminal: <><rect x="3" y="4" width="18" height="16" rx="4"/><path d="m7 9 3 3-3 3m6 0h4"/></>,
+    globe: <><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></>,
+    copy: <><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M15 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3"/></>,
+    edit: <><path d="m15 4 5 5M4 20l5-1L21 7a2 2 0 0 0-5-5L4 14Z"/><path d="M3 22h18"/></>,
     film: <><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 4v16M17 4v16M3 8h4m-4 8h4m10-8h4m-4 8h4"/><path d="m10 9 4 3-4 3Z"/></>,
     motion: <><circle cx="15" cy="4" r="2"/><path d="m12 8 4 3 4 1m-8-4-3 4-5 1m8-5 1 7-6 6m6-6 5 1 2 5M2 6h5M1 18h3"/></>,
     image: <><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 4-6 5 7"/></>,

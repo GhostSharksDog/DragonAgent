@@ -1,6 +1,8 @@
 # 创作工坊 · 本地 2D 桌宠
 
-DragonAgent 0.3.0 的「创作工坊」提供第一个内置工作流：确定角色 → 连贯动作生成 → 透明抠图 → 循环与位置整理 → 预览、导出、应用。应用使用 TypeScript，通过本机 API 调度独立安装的 ComfyUI。ComfyUI 自身使用其 Python 环境；无需为 DragonAgent 编写 Python 脚本。
+DragonAgent 0.4.0 的「创作工坊」提供第一个内置工作流：创作对话与参数 → 角色 LoRA → 确定立绘 → 连贯动作生成 → 透明抠图 → 循环与位置整理 → 预览、导出、应用。应用使用 TypeScript，通过本机 API 调度独立安装的 ComfyUI。ComfyUI 自身使用其 Python 环境；无需为 DragonAgent 编写 Python 脚本。
+
+只有立绘、视频和 AI 抠图需要 ComfyUI。聊天、提示词整理、项目记录、LoRA 管理、已有素材预览、本地整理与导出、皮肤切换无需服务在线。模型、节点检测按实际制作阶段执行。
 
 ## 首次准备
 
@@ -9,7 +11,10 @@ DragonAgent 0.3.0 的「创作工坊」提供第一个内置工作流：确定�
 
 | 功能 | 默认文件 / 选项 | ComfyUI 位置 | 官方 / 作者来源 |
 |---|---|---|---|
-| 二次元立绘 | `animagine-xl-4.0.safetensors` | `models/checkpoints` | [Cagliostro Labs](https://huggingface.co/cagliostrolab/animagine-xl-4.0/tree/main) |
+| Anima 立绘（新项目默认） | `anima-base-v1.0.safetensors` | `models/diffusion_models` | [Anima](https://huggingface.co/circlestone-labs/Anima) |
+| Anima 编码器 | `qwen_3_06b_base.safetensors` | `models/text_encoders` | 使用与 Anima 兼容的本地文件 |
+| Anima VAE | `qwen_image_vae.safetensors` | `models/vae` | 使用与 Anima 兼容的本地文件 |
+| Animagine 立绘（可选） | `animagineXL40_v4Opt.safetensors` | `models/checkpoints` | [Cagliostro Labs](https://huggingface.co/cagliostrolab/animagine-xl-4.0/tree/main) |
 | 视频生成 | `wan2.2_ti2v_5B_fp16.safetensors` | `models/diffusion_models` | [ComfyOrg Wan 2.2](https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/tree/main/split_files/diffusion_models) |
 | 文字编码 | `umt5_xxl_fp8_e4m3fn_scaled.safetensors` | `models/text_encoders` | [ComfyOrg Wan 2.2](https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/tree/main/split_files/text_encoders) |
 | 视频解码 | `wan2.2_vae.safetensors` | `models/vae` | [ComfyOrg Wan 2.2](https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/tree/main/split_files/vae) |
@@ -24,7 +29,8 @@ DragonAgent 0.3.0 的「创作工坊」提供第一个内置工作流：确定�
 
 目标机器是 RTX 4060 Laptop 8GB 显存、16GB 系统内存。Wan 2.2 5B 的 [ComfyUI 官方示例](https://docs.comfy.org/tutorials/video/wan/wan2_2)说明可通过卸载适配 8GB 显存，实际耗时仍取决于可用内存和其他 GPU 程序。
 
-- SDXL 立绘：1024×1024、batch 1、Euler a、28 步、CFG 5、分块 VAE 解码。可选择其他兼容 SDXL 的 checkpoint，不能把 FLUX 等其他架构文件直接替换到这个模板中。
+- Anima 立绘：1024×1024、30 步、CFG 4、dpmpp_2m_sde_gpu、normal。正负面提示词独立编码，LoRA 通过加载节点生效；文本里的 `<lora:…>` 不会加载文件。
+- Animagine 立绘：1024×1024、batch 1、Euler a、28 步、CFG 5、分块 VAE 解码。可选择其他兼容 SDXL 的 checkpoint，不能把 FLUX 等其他架构文件直接替换到这个模板中。旧项目保留自己的模型与采样设置。
 - 动作生成：Wan 2.2 **TI2V 5B**、512×512、49 帧、24fps、30 步、CFG 5、uni_pc、simple、sampling shift 8、分块 VAE 解码。不是 14B I2V 或 Wan Animate。
 - 抠图：BiRefNet ToonOut，最多 8 帧一批，Alpha 背景，保留原色，不灰度化、不做逐帧独立缩放。
 - 同时只制作一个项目。各动作依次执行；检测出质量问题时每项最多自动重试两次。显存不足会报错并保留素材，不静默切换云端或偷偷降低参数。
@@ -32,6 +38,12 @@ DragonAgent 0.3.0 的「创作工坊」提供第一个内置工作流：确定�
 ## 创作步骤
 
 上传完整全身立绘，或填写中文描述、选用已有 Dragon 文字模型整理英文绘图提示词，再生成立绘。文字整理仅发送文字，不发送角色图片；也可以直接手填绘图提示词。确认角色后制作动作包。
+
+每个项目有独立创作对话。助手与面板共同修改正负面提示词、角色设定和动作描述，保留修订并可撤销；制作期间的修改进入下一次草稿。停止助手与停止制作分别控制。
+
+角色 LoRA 可搜索 Civitai、粘贴模型链接或导入本地 SafeTensors。Anima 和 Animagine／SDXL 分别校验，用户选择后才下载。需要认证时在准备环境中保存 Civitai 密钥；下载完成且 SHA256 与格式校验通过后才启用。
+
+选定 LoRA 后优先参考作者触发词和对应服装说明。面板可逐组加入触发词、复制并查看来源，最终正负面提示词完整可见。明确的单值作者权重优先使用；无推荐值时才默认 0.8，可手动修改。多个服装方案不要全部堆入一张图。触发词能帮助保持角色特征，但不能保证瞳色、服装或肢体完全一致，仍需确认立绘。
 
 动作包括待机、左右走路、左右跑动、思考、说话、等待输入、等待审批、成功、失败。每项动作保留种子、提示词、模型、原始帧、抠图帧、整理结果和检查报告。用户可重做单项、切换候选版本及并排比较。
 

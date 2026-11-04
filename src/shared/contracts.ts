@@ -7,6 +7,7 @@ export type PermissionMode = 'ask' | 'auto' | 'full';
 export interface CodexModel { id: string; model: string; name: string; description: string; isDefault: boolean; defaultEffort: string; efforts: { value: string; description: string }[] }
 export interface CodexCatalog { status: 'idle' | 'loading' | 'ready' | 'error'; models: CodexModel[]; error?: string }
 export interface ChatAttachment { id: string; kind: 'file' | 'chat'; name: string; size: number; mime: string; sourceSessionId?: string; createdAt: number; extractionError?: string }
+export interface DroppedFile { path?: string; name: string; mime?: string; data?: Uint8Array }
 export type RunStatus = 'idle' | 'running' | 'waiting' | 'stopping' | 'completed' | 'cancelled' | 'error' | 'interrupted' | 'paused';
 export interface AgentTask { id: string; parentId?: string; runId: string; title: string; profileId: string; status: import('../../packages/agent-core/src/types').AgentStatus; result?: string; error?: string; requests: number; usage: { input: number; output: number } }
 export interface ModelProfile {
@@ -19,6 +20,8 @@ export interface McpConfig {
 }
 export interface McpStatus { id: string; state: 'disabled' | 'connecting' | 'connected' | 'error'; tools: number; error?: string }
 export interface AppSettings {
+  layout?: { leftCollapsed: boolean; rightCollapsed: boolean };
+  assistant?: import('./persona').AssistantPreferences;
   selectedBackend?: BackendKind;
   selectedCodexModel?: string; selectedCodexEffort?: string;
   limits: { concurrency: number; children: number; requests: number };
@@ -26,14 +29,23 @@ export interface AppSettings {
   pet: { visible: boolean; scale: number; alwaysOnTop: boolean; x?: number; y?: number; shortcut: string; chatMode?: 'simple' | 'detailed' };
   theme: 'light' | 'dark' | 'system';
 }
-export interface ChatMessage { id: string; commandId?: string; role: 'user' | 'assistant' | 'notice'; text: string; createdAt: number; runId?: string; partial?: boolean; attachments?: ChatAttachment[] }
-export interface ToolEvent { id: string; name: string; arguments: string; result?: string; status: 'running' | 'completed' | 'error' | 'cancelled' | 'unknown'; createdAt: number; runId: string; agentId?: string }
+export interface ChatMessage { sequence?: number; id: string; commandId?: string; role: 'user' | 'assistant' | 'notice'; text: string; createdAt: number; runId?: string; partial?: boolean; attachments?: ChatAttachment[]; contextCheckpoint?: string; beforeNativeTurnId?: string; beforeNativeId?: string }
+export interface ConversationVersion { collaborationState?: AgentSession['collaborationState']; collaborationHistory?:AgentSession['collaborationHistory']; id: string; label: string; createdAt: number; messages: ChatMessage[]; tools: ToolEvent[]; tasks?: AgentTask[]; nativeId?: string; nativeTurnId?: string; checkpoint: string; status: RunStatus; error?: string; usage?: AgentSession['usage'] }
+export interface ToolEvent { sequence?: number; id: string; name: string; arguments: string; result?: string; status: 'queued' | 'approval' | 'running' | 'completed' | 'declined' | 'error' | 'cancelled' | 'unknown'; createdAt: number; startedAt?: number; completedAt?: number; cwd?: string; exitCode?: number | null; runId: string; agentId?: string }
 export interface PendingRequest {
+  toolId?: string;
   id: string; kind: 'approval' | 'question'; title: string; details: string;
   questions?: { id: string; question: string; options?: string[] }[];
   sessionId: string; runId: string;
 }
 export interface AgentSession {
+  collaboration?: import('./collaboration').CollaborationConfig;
+  collaborationState?: import('./collaboration').CollaborationState;
+  collaborationHistory?: import('./collaboration').CollaborationState[];
+  artifacts?: FileArtifact[];
+  versions?: ConversationVersion[];
+  versionId?: string;
+  nativeTurnId?: string;
   reasoningEffort?: string;
   permissionMode?: PermissionMode; draftAttachments?: ChatAttachment[];
   tasks?: AgentTask[]; readOnly?: boolean; sourceEngine?: string;
@@ -45,8 +57,14 @@ export interface AgentSession {
   usage?: { input: number; output: number; context?: number; estimated?: boolean; window?: number };
 }
 export interface MemoryFact { id: string; text: string; tags: string[]; createdAt: number; source?: string }
+export interface FileArtifact { id: string; name: string; path: string; size: number; mime: string; createdAt: number; runId: string; modifiedAt: number }
+export interface ArtifactPreview { offset?:number; nextOffset?:number; page?:number; pages?:number; artifact: FileArtifact; text?: string; url?: string; truncated?: boolean }
+export interface ProviderBalance { profileId: string; status: 'loading' | 'ready' | 'error' | 'unsupported'; available?: boolean; updatedAt?: number; error?: string; balances: { currency: string; total: string; granted: string; toppedUp: string }[] }
 export interface BackendState { state: 'stopped' | 'starting' | 'ready' | 'error'; message: string }
 export interface Snapshot {
+  petChat?: {sessionId?:string;pinned?:boolean;draft?:string;notice?:string;attachments?:ChatAttachment[];queue?:{commandId:string;sessionId:string;text:string;attachments?:ChatAttachment[]}[]};
+  artifactPreview?: ArtifactPreview;
+  balances?: ProviderBalance[];
   codexCatalog: CodexCatalog;
   resolvedTheme: 'light' | 'dark';
   workbenchPage?: 'chat' | 'settings' | 'workshop';
@@ -58,6 +76,7 @@ export interface Snapshot {
   petView: 'hidden' | 'compose' | 'reply' | 'quota'; animationStartedAt: number; version: string;
 }
 export interface BackendHooks {
+  nativeTurnId?(id: string): void;
   text(text: string, replace?: boolean): void;
   tool(event: Partial<ToolEvent> & { id: string; name: string }): void;
   request(request: Omit<PendingRequest, 'sessionId' | 'runId'>, signal: AbortSignal): Promise<unknown>;
@@ -71,10 +90,27 @@ export interface AgentBackend {
   dispose(): Promise<void>;
 }
 export type Action = WorkshopAction
+  | {type:'pet.chat.bind';id?:string;pinned:boolean}
+  | {type:'pet.chat.draft';text:string}
+  | {type:'pet.chat.send';text:string;commandId:string}
+  | {type:'pet.chat.cancelQueued';commandId:string}
+  | {type:'pet.chat.attach';files:DroppedFile[]}
+  | {type:'pet.chat.pickFiles'}
+  | {type:'pet.chat.removeAttachment';id:string}
+  | { type:'session.collaboration'; id:string; config:import('./collaboration').CollaborationConfig }
+  | { type: 'artifact.preview'; sessionId: string; artifactId: string; offset?:number; page?:number }
+  | { type: 'artifact.reveal'; sessionId: string; artifactId: string }
+  | { type: 'artifact.save'; sessionId: string; artifactId: string }
+  | { type: 'session.resend'; id: string; messageId: string; text: string; commandId: string }
+  | { type: 'session.version'; id: string; versionId: string }
+  | { type: 'provider.balance.refresh'; profileId: string; force?: boolean }
+  | { type: 'layout.save'; leftCollapsed?: boolean; rightCollapsed?: boolean }
+  | { type: 'assistant.preferences.save'; preferences: import('./persona').AssistantPreferences }
   | { type: 'codex.models' }
   | { type: 'session.codexModel'; id: string; model: string; effort?: string }
   | { type: 'session.model'; id: string; profileId: string }
   | { type: 'session.permissionMode'; id: string; mode: PermissionMode }
+  | { type: 'session.attachDrop'; id: string; files: DroppedFile[] }
   | { type: 'session.attachFiles'; id: string }
   | { type: 'session.attachChat'; id: string; sourceId: string }
   | { type: 'session.removeAttachment'; id: string; attachmentId: string }
@@ -108,7 +144,7 @@ export type Action = WorkshopAction
   | { type: 'quota.refresh' }
   | { type: 'codex.login' }
   | { type: 'external.open'; url: string };
-export interface DragonBridge { snapshot(): Promise<Snapshot>; action(action: Action): Promise<unknown>; subscribe(listener: (state: Snapshot) => void): () => void }
+export interface DragonBridge { snapshot(): Promise<Snapshot>; action(action: Action): Promise<unknown>; subscribe(listener: (state: Snapshot) => void): () => void; filePath(file: File): string }
 declare global { interface Window { dragon: DragonBridge } }
 
 export function contextPolicy(profile: Pick<ModelProfile, 'contextWindow' | 'maxOutput'>) {

@@ -20,7 +20,7 @@ export class WorkshopStore {
   skins(): WorkshopSkin[] { return this.db.prepare('SELECT json FROM skins').all().map(row => JSON.parse(String(row.json))); }
   save(project: WorkshopProject) { this.db.prepare('INSERT INTO projects VALUES (?,?) ON CONFLICT(id) DO UPDATE SET json=excluded.json').run(project.id, JSON.stringify(project)); }
   skin(skin: WorkshopSkin) { this.db.prepare('INSERT INTO skins VALUES (?,?) ON CONFLICT(id) DO UPDATE SET json=excluded.json').run(skin.id, JSON.stringify(skin)); }
-  remove(id: string) { this.db.prepare('DELETE FROM projects WHERE id=?').run(id); }
+  remove(id: string) { this.db.prepare('DELETE FROM projects WHERE id=?').run(id); this.db.prepare('DELETE FROM events WHERE project_id=?').run(id); }
   event(id: string, type: string, value: unknown) { this.db.prepare('INSERT INTO events(project_id,time,type,json) VALUES(?,?,?,?)').run(id, Date.now(), type, JSON.stringify(value)); }
   close() { this.db.close(); }
 }

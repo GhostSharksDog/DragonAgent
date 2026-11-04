@@ -1,6 +1,6 @@
 {
   "name": "@dragon-agent/core",
-  "version": "0.2.1",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Standalone TypeScript agent loop, scoped tools, MCP and child-agent coordination",

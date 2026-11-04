@@ -4,10 +4,10 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { attachAppServer, resolveCodex, type JsonLineRpc, type RpcMessage, sanitizeDiagnostic } from '../pet/main/agent/transport';
 import { normalizeQuota } from '../pet/main/agent/quota';
-import type { AgentBackend, AgentSession, BackendHooks, BackendState, CodexModel } from '../shared/contracts';
+import type { AgentBackend, AgentSession, BackendHooks, BackendState, CodexModel, ToolEvent } from '../shared/contracts';
 import type { QuotaSnapshot } from '../pet/shared/types';
 import type { ToolBridge } from './dragon';
-import { DRAGON_PERSONA } from '../shared/persona';
+import { assistantPrompt, type AssistantPreferences } from '../shared/persona';
 import { CodexToolBindings } from './codex-tools';
 import packageInfo from '../../package.json';
 
@@ -19,12 +19,12 @@ function closeConnection(connection: Connection) {
   } else connection.child.kill();
   connection.child.unref();
 }
-interface Active { connection: Connection; session: AgentSession; hooks: BackendHooks; signal: AbortSignal; tools: CodexToolBindings; turnId?: string; resolve(): void; reject(error: Error): void; files: Map<string, unknown>; requests: Set<number | string> }
+interface Active { readOnly?: boolean; connection: Connection; session: AgentSession; hooks: BackendHooks; signal: AbortSignal; tools: CodexToolBindings; turnId?: string; resolve(): void; reject(error: Error): void; files: Map<string, unknown>; commands: Map<string, { event: Partial<ToolEvent> & {id:string;name:string}; output:string; publishedAt:number }>; requests: Set<number | string> }
 export class CodexBackend implements AgentBackend {
   private accountConnection: Connection | null = null;
   private starting: Promise<Connection> | null = null;
   private active = new Map<string, Active>();
-  constructor(private options: { home: string; executable(): string; tools: ToolBridge; state(value: BackendState): void; account(value: string): void; quota(value: QuotaSnapshot): void; open(url: string): Promise<void> }) {}
+  constructor(private options: { preferences?(): AssistantPreferences | undefined; home: string; executable(): string; tools: ToolBridge; state(value: BackendState): void; account(value: string): void; quota(value: QuotaSnapshot): void; open(url: string): Promise<void> }) {}
   private async connect(native = false): Promise<Connection> {
     await mkdir(path.join(this.options.home, 'codex'), { recursive: true });
     const executable = await resolveCodex(this.options.executable());
@@ -86,18 +86,20 @@ export class CodexBackend implements AgentBackend {
     }
     throw new Error('Codex 模型列表页数超出限制，请重试。');
   }
-  async run(session: AgentSession, prompt: string, hooks: BackendHooks, signal: AbortSignal) {
-    const tools = await this.options.tools.bindTools(session, hooks, signal);
+  async run(session: AgentSession, prompt: string, hooks: BackendHooks, signal: AbortSignal, options: { readOnly?: boolean; outputSchema?: unknown } = {}) {
+    const discovered = await this.options.tools.bindTools(session, hooks, signal);
+    const allowedReadTools = new Set(['pet_task_scope','pet_attachment_read','pet_files_read','pet_files_search','pet_files_list','deepseek_web_search','deepseek_web_fetch']);
+    const tools = options.readOnly ? discovered.filter(t=>allowedReadTools.has(t.name)) : discovered;
     let connection: Connection | undefined;
     try {
       const bindings = new CodexToolBindings(tools);
       const mode = session.permissionMode ?? 'ask', cwd = session.workspace || this.options.home;
-      const policy = mode === 'ask' ? 'on-request' : 'never';
-      const sandbox = mode === 'full' ? 'danger-full-access' : mode === 'auto' ? 'workspace-write' : 'read-only';
-      const sandboxPolicy = mode === 'full' ? { type:'dangerFullAccess' } : mode === 'auto' ? { type:'workspaceWrite', writableRoots:[cwd], networkAccess:true } : { type:'readOnly', networkAccess:false };
-      signal.throwIfAborted(); connection = await this.connect(mode !== 'ask' || session.terminalEnabled && Boolean(session.workspace)); signal.throwIfAborted();
+      const policy = options.readOnly ? 'never' : mode === 'ask' ? 'on-request' : 'never';
+      const sandbox = options.readOnly ? 'read-only' : mode === 'full' ? 'danger-full-access' : mode === 'auto' ? 'workspace-write' : 'read-only';
+      const sandboxPolicy = options.readOnly ? {type:'readOnly',networkAccess:false} : mode === 'full' ? { type:'dangerFullAccess' } : mode === 'auto' ? { type:'workspaceWrite', writableRoots:[cwd], networkAccess:true } : { type:'readOnly', networkAccess:false };
+      signal.throwIfAborted(); connection = await this.connect(!options.readOnly && (mode !== 'ask' || session.terminalEnabled && Boolean(session.workspace))); signal.throwIfAborted();
       const c = connection;
-      const common = { cwd: session.workspace || this.options.home, runtimeWorkspaceRoots: session.workspace ? [session.workspace] : [], sandbox, approvalPolicy: policy, approvalsReviewer: 'user', ...(session.model ? { model: session.model } : {}), ...(session.reasoningEffort ? { config: { model_reasoning_effort: session.reasoningEffort } } : {}), developerInstructions: DRAGON_PERSONA + `\n当前对话权限：${mode}。文件与浏览器操作优先使用 Dragon 提供的工具，先查看 pet_task_scope；auto 自动批准范围内操作，full 允许其他目录和网站。` };
+      const common = { cwd: session.workspace || this.options.home, runtimeWorkspaceRoots: session.workspace ? [session.workspace] : [], sandbox, approvalPolicy: policy, approvalsReviewer: 'user', ...(session.model ? { model: session.model } : {}), ...(session.reasoningEffort ? { config: { model_reasoning_effort: session.reasoningEffort } } : {}), developerInstructions: assistantPrompt(this.options.preferences?.()) + (options.readOnly ? '\n本通道仅限只读规划与复核。不得创建、修改或删除文件，不执行命令或外部写入。' : '') + `\n当前对话权限：${mode}。文件与浏览器操作优先使用 Dragon 提供的工具，先查看 pet_task_scope；auto 自动批准范围内操作，full 允许其他目录和网站。` };
       const result: any = session.nativeId
         ? await c.rpc.request('thread/resume', { ...common, threadId: session.nativeId, dynamicTools: bindings.definitions })
         : await c.rpc.request('thread/start', { ...common, ephemeral: false, dynamicTools: bindings.definitions });
@@ -105,7 +107,7 @@ export class CodexBackend implements AgentBackend {
       // A resumed thread can contain an interrupted turn; never resume its execution automatically.
       for (const turn of result.thread.turns ?? []) if (turn.status === 'inProgress') await c.rpc.request('turn/interrupt', { threadId: result.thread.id, turnId: turn.id });
       await new Promise<void>((resolve, reject) => {
-        const item: Active = { connection: c, session, hooks, signal, tools: bindings, resolve, reject, files: new Map(), requests: new Set() };
+        const item: Active = { readOnly:options.readOnly, connection: c, session, hooks, signal, tools: bindings, resolve, reject, files: new Map(), commands: new Map(), requests: new Set() };
         this.active.set(session.id, item);
         c.rpc.on('message', (m: RpcMessage) => { void this.receive(item, m).catch(reject); });
         c.rpc.once('close', reject);
@@ -114,7 +116,7 @@ export class CodexBackend implements AgentBackend {
         item.resolve = () => { signal.removeEventListener('abort', abort); resolve(); };
         item.reject = error => { signal.removeEventListener('abort', abort); reject(error); };
         if (signal.aborted) { item.resolve(); return; }
-        void c.rpc.request<any>('turn/start', { threadId: result.thread.id, input: [{ type: 'text', text: prompt, text_elements: [] }], clientUserMessageId: randomUUID(), cwd: session.workspace || this.options.home, runtimeWorkspaceRoots: session.workspace ? [session.workspace] : [], approvalPolicy: policy, approvalsReviewer: 'user', sandboxPolicy, ...(session.model ? { model: session.model } : {}), ...(session.reasoningEffort ? { effort: session.reasoningEffort } : {}) }).then(value => { item.turnId = value.turn.id; if (signal.aborted) abort(); }, item.reject);
+        void c.rpc.request<any>('turn/start', { threadId: result.thread.id, input: [{ type: 'text', text: prompt, text_elements: [] }], ...(options.outputSchema ? {outputSchema:options.outputSchema}:{}), clientUserMessageId: randomUUID(), cwd: session.workspace || this.options.home, runtimeWorkspaceRoots: session.workspace ? [session.workspace] : [], approvalPolicy: policy, approvalsReviewer: 'user', sandboxPolicy, ...(session.model ? { model: session.model } : {}), ...(session.reasoningEffort ? { effort: session.reasoningEffort } : {}) }).then(value => { item.turnId = value.turn.id; if (signal.aborted) abort(); }, item.reject);
       });
     } finally { this.active.delete(session.id); if (connection) closeConnection(connection); await this.options.tools.unbindTools(session); }
   }
@@ -136,10 +138,11 @@ export class CodexBackend implements AgentBackend {
         respond({ answers: Object.fromEntries(Object.entries(answers ?? {}).map(([key, value]) => [key, { answers: [value] }])) }); return;
       }
       if (message.method === 'item/commandExecution/requestApproval' || message.method === 'item/fileChange/requestApproval') {
+        if(item.readOnly){respond({decision:'decline'});return;}
         const isCommand = message.method === 'item/commandExecution/requestApproval';
         const details = isCommand ? (p.command ? JSON.stringify({ command: p.command, cwd: p.cwd, permissions: p.additionalPermissions }, null, 2) : '') : JSON.stringify(item.files.get(p.itemId) ?? '');
         if (!(session.terminalEnabled || session.permissionMode === 'auto' || session.permissionMode === 'full') || !details || details === '""') { respond({ decision: 'decline' }); return; }
-        const allow = await hooks.request({ id: String(message.id), kind: 'approval', title: isCommand ? 'Codex 命令执行' : 'Codex 文件变更', details }, signal);
+        const allow = await hooks.request({ id: String(message.id), kind: 'approval', toolId: p.itemId, title: isCommand ? 'Codex 命令执行' : 'Codex 文件变更', details }, signal);
         respond({ decision: allow === true ? 'accept' : 'decline' }); return;
       }
       if (message.method === 'item/permissions/requestApproval') { respond({ permissions: {}, scope: 'turn' }); return; }
@@ -147,12 +150,32 @@ export class CodexBackend implements AgentBackend {
     }
     if (signal.aborted && message.method !== 'turn/completed') return;
     switch (message.method) {
-      case 'turn/started': item.turnId = p.turn.id; break;
+      case 'turn/started': item.turnId = p.turn.id; hooks.nativeTurnId?.(p.turn.id); break;
       case 'item/agentMessage/delta': hooks.text(p.delta); break;
+      case 'item/commandExecution/outputDelta': {
+        if (p.turnId && item.turnId && p.turnId !== item.turnId) break;
+        const command = item.commands.get(p.itemId);
+        if (!command || typeof p.delta !== 'string') break;
+        command.output = (command.output + p.delta).slice(-65536);
+        if (Date.now() - command.publishedAt >= 150) {
+          command.publishedAt = Date.now();
+          hooks.tool({...command.event, result:command.output, status:'running'});
+        }
+        break;
+      }
       case 'item/started':
       case 'item/completed': {
         if (p.item.type === 'fileChange') item.files.set(p.item.id, p.item.changes);
-        if (['commandExecution', 'fileChange', 'dynamicToolCall', 'mcpToolCall'].includes(p.item.type)) hooks.tool({ id: p.item.id, name: item.tools.resolve(p.item.tool) ?? p.item.tool ?? p.item.command ?? p.item.type, arguments: JSON.stringify(p.item.arguments ?? p.item.changes ?? {}), status: message.method === 'item/started' ? 'running' : p.item.status === 'failed' ? 'error' : 'completed', result: p.item.aggregatedOutput ?? JSON.stringify(p.item.contentItems ?? p.item.result ?? '') });
+        if (p.item.type === 'commandExecution') {
+          const started = message.method === 'item/started', previous = item.commands.get(p.item.id);
+          const event = {id:p.item.id, name:'commandExecution', arguments:JSON.stringify({command:p.item.command,cwd:p.item.cwd}), cwd:p.item.cwd, startedAt:previous?.event.startedAt ?? (started ? Date.now() : undefined)};
+          const output = (p.item.aggregatedOutput ?? previous?.output ?? '').slice(-65536);
+          hooks.tool({...event, status:started?'running':p.item.status==='declined'?'declined':p.item.status==='cancelled'?'cancelled':p.item.status==='failed'||(typeof p.item.exitCode==='number'&&p.item.exitCode!==0)?'error':'completed', exitCode:p.item.exitCode, result:output});
+          if (started) item.commands.set(p.item.id,{event,output,publishedAt:Date.now()});
+          else item.commands.delete(p.item.id);
+          break;
+        }
+        if (['commandExecution', 'fileChange', 'dynamicToolCall', 'mcpToolCall'].includes(p.item.type)) hooks.tool({ id: p.item.id, name: p.item.type==='commandExecution'?'commandExecution':item.tools.resolve(p.item.tool) ?? p.item.tool ?? p.item.type, arguments: JSON.stringify(p.item.type==='commandExecution'?{command:p.item.command,cwd:p.item.cwd}:p.item.arguments ?? p.item.changes ?? {}), status: message.method === 'item/started' ? 'running' : p.item.status === 'failed' ? 'error' : p.item.status === 'declined' ? 'declined' : p.item.status === 'cancelled' ? 'cancelled' : 'completed', cwd: p.item.cwd, exitCode: p.item.exitCode, result: p.item.aggregatedOutput ?? JSON.stringify(p.item.contentItems ?? p.item.result ?? '') });
         break;
       }
       case 'thread/tokenUsage/updated': { const usage = p.tokenUsage?.last ?? p.tokenUsage?.total; if (usage) hooks.usage({ input: usage.inputTokens ?? 0, output: usage.outputTokens ?? 0, context: usage.inputTokens, window: p.tokenUsage?.modelContextWindow }); break; }
@@ -164,6 +187,12 @@ export class CodexBackend implements AgentBackend {
     const item = this.active.get(session.id);
     await this.options.tools.cancel(session);
     if (item?.turnId) { await item.connection.rpc.request('turn/interrupt', { threadId: session.nativeId, turnId: item.turnId }); }
+  }
+  async forkBefore(threadId: string, lastTurnId: string): Promise<string> {
+    const connection=await this.connect(false);
+    try { const value=await connection.rpc.request<any>('thread/fork',{threadId,lastTurnId,excludeTurns:true});
+      if(typeof value?.thread?.id!=='string')throw Error('Codex 未返回分支聊天编号。');return value.thread.id;
+    } finally {closeConnection(connection);}
   }
   async dispose() { for (const item of this.active.values()) { item.reject(new Error('应用已关闭。')); closeConnection(item.connection); } this.active.clear(); const account = this.accountConnection; this.accountConnection = null; if (account) closeConnection(account); }
 }

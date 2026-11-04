@@ -1,16 +1,19 @@
 import type { Graph } from './comfy';
-import type { WorkshopSettings } from '../../shared/workshop';
+import { characterSettings, type WorkshopSettings } from '../../shared/workshop';
 
 const node = (class_type: string, inputs: Record<string, unknown>) => ({ class_type, inputs });
 const negative = 'cropped, extra limbs, missing limbs, malformed hands, changing character, changing clothes, inconsistent face, camera movement, zoom, text, watermark, background objects, motion blur';
-export function characterGraph(s: WorkshopSettings, prompt: string, avoid: string, seed: number, prefix: string): Graph {
+export function characterGraph(s: WorkshopSettings, prompt: string, avoid: string, seed: number, prefix: string, lora?: {file:string;strength:number}): Graph {
+  const c=characterSettings(s), anima=c.backend==='anima';
   return {
-    '1': node('CheckpointLoaderSimple', { ckpt_name: s.checkpoint }),
-    '2': node('CLIPTextEncode', { clip: ['1',1], text: `${prompt}, full body, solo, entire character visible, feet visible, centered, front view, chibi, simple plain background, safe, masterpiece, high score, great score` }),
-    '3': node('CLIPTextEncode', { clip: ['1',1], text: `${negative}, ${avoid}` }),
-    '4': node('EmptyLatentImage', { width: 1024, height: 1024, batch_size: 1 }),
-    '5': node('KSampler', { model: ['1',0], positive: ['2',0], negative: ['3',0], latent_image: ['4',0], seed, steps: 28, cfg: 5, sampler_name: 'euler_ancestral', scheduler: 'normal', denoise: 1 }),
-    '6': node('VAEDecodeTiled', { samples: ['5',0], vae: ['1',2], tile_size: 512, overlap: 64, temporal_size: 16, temporal_overlap: 4 }),
+    '1': anima ? node('UNETLoader',{unet_name:c.model,weight_dtype:'default'}) : node('CheckpointLoaderSimple', { ckpt_name:c.model }),
+    ...(anima?{'clip':node('CLIPLoader',{clip_name:c.encoder,type:'stable_diffusion',device:'default'}),'vae':node('VAELoader',{vae_name:c.vae})}:{}),
+    ...(lora?{'lora':node('LoraLoader',{model:['1',0],clip:[anima?'clip':'1',anima?0:1],lora_name:lora.file,strength_model:lora.strength,strength_clip:lora.strength})}:{}),
+    '2': node('CLIPTextEncode', { clip: [lora?'lora':anima?'clip':'1',lora?1:anima?0:1], text: prompt }),
+    '3': node('CLIPTextEncode', { clip: [lora?'lora':anima?'clip':'1',lora?1:anima?0:1], text: avoid }),
+    '4': node('EmptyLatentImage', { width: c.width, height: c.height, batch_size: 1 }),
+    '5': node('KSampler', { model: [lora?'lora':'1',0], positive: ['2',0], negative: ['3',0], latent_image: ['4',0], seed, steps: c.steps, cfg: c.cfg, sampler_name: c.sampler, scheduler: c.scheduler, denoise: 1 }),
+    '6': node('VAEDecodeTiled', { samples: ['5',0], vae: [anima?'vae':'1',anima?0:2], tile_size: 512, overlap: 64, temporal_size: 16, temporal_overlap: 4 }),
     '7': node('SaveImage', { images: ['6',0], filename_prefix: prefix }),
   };
 }

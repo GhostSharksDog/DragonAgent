@@ -16,11 +16,19 @@ export const MOTIONS = [
 ] as const;
 export type MotionKey = typeof MOTIONS[number]['key'];
 export type WorkshopStatus = 'draft' | 'character' | 'awaiting-character' | 'queued' | 'running' | 'stopping' | 'paused' | 'review' | 'needs-attention' | 'completed' | 'cancelled' | 'error';
+export type CharacterBackend = 'anima' | 'animagine';
+export interface CharacterSettings { backend: CharacterBackend; model: string; encoder: string; vae: string; width: number; height: number; steps: number; cfg: number; sampler: string; scheduler: string }
+export const ANIMA_SETTINGS: CharacterSettings = {backend:'anima',model:'anima-base-v1.0.safetensors',encoder:'qwen_3_06b_base.safetensors',vae:'qwen_image_vae.safetensors',width:1024,height:1024,steps:30,cfg:4,sampler:'dpmpp_2m_sde_gpu',scheduler:'normal'};
+export const ANIMAGINE_SETTINGS: CharacterSettings = {backend:'animagine',model:'animagineXL40_v4Opt.safetensors',encoder:'',vae:'',width:1024,height:1024,steps:28,cfg:5,sampler:'euler_ancestral',scheduler:'normal'};
+export function characterSettings(s: WorkshopSettings): CharacterSettings { return s.character ?? {...ANIMAGINE_SETTINGS,model:s.checkpoint}; }
+export function characterDefaults(backend: CharacterBackend) { return {characterPrompt: backend==='anima' ? 'masterpiece, best quality, safe, 1girl, adult woman, silver hair, purple eyes, small dragon horns, gentle playful expression, simple costume, full body, feet visible, solo, centered, simple plain background' : '1girl, adult woman, silver hair, purple eyes, small dragon horns, gentle playful expression, simple costume, full body, feet visible, solo, centered, simple plain background, safe, masterpiece, high score, great score', negativePrompt:'worst quality, low quality, blurry, bad anatomy, extra limbs, extra fingers, cropped, text, watermark, multiple characters'}; }
 export interface WorkshopSettings {
+  character?: CharacterSettings;
+  modelsRoot?:string;
   endpoint: string; checkpoint: string; videoModel: string; textEncoder: string; vae: string; matteModel: string;
 }
 export const DEFAULT_WORKSHOP_SETTINGS: WorkshopSettings = {
-  endpoint: 'http://127.0.0.1:8188', checkpoint: 'animagine-xl-4.0.safetensors',
+  character: {...ANIMA_SETTINGS}, endpoint: 'http://127.0.0.1:8188', checkpoint: 'animagine-xl-4.0.safetensors',
   videoModel: 'wan2.2_ti2v_5B_fp16.safetensors', textEncoder: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors',
   vae: 'wan2.2_vae.safetensors', matteModel: 'BiRefNet_toonout',
 };
@@ -37,7 +45,7 @@ export interface ComfyEnvironment {
   issues: EnvironmentIssue[]; checkpoints: string[]; gpu?: string; vramTotal?: number; vramFree?: number; ramTotal?: number; ramFree?: number;
   version?: string; supportsTargetedCancel?: boolean;
 }
-export interface CharacterAsset { id: string; file: string; source: 'upload' | 'generated'; seed?: number; model?: string; prompt?: string; sha256: string; createdAt: number }
+export interface CharacterAsset { id: string; file: string; source: 'upload' | 'generated'; seed?: number; model?: string; settings?:CharacterSettings; prompt?: string; negativePrompt?:string; lora?:WorkshopProject['lora']; sha256: string; createdAt: number }
 export interface QualityReport {
   warnings: string[]; passed: boolean; frameCount: number; emptyFrames: number; clippedFrames: number;
   opaqueCorners: number; positionJump: number; alphaFlicker: number; seam?: number; motion: number;
@@ -55,7 +63,14 @@ export interface ComfyOperation {
   actionKey?: MotionKey; versionId?: string; batchStart?: number; promptId?: string; startedAt: number;
   state: 'submitting' | 'submitted' | 'unknown' | 'finished'; outputs?: ComfyFile[];
 }
+export interface WorkshopParameters {characterPrompt:string;negativePrompt:string;description:string;actions?:Partial<Record<MotionKey,string>>;seed?:number}
 export interface WorkshopProject {
+  download?: {state:'running'|'completed'|'error'|'cancelled';received:number;total:number;error?:string};
+  assistant?: { status: 'idle'|'running'|'error'; messages: {role:'user'|'assistant';text:string}[]; error?:string };
+  revisions?: WorkshopParameters[];
+  draft?: WorkshopParameters;
+  lora?: {authorNotes?:string;sourceUrl?:string;backend?:CharacterBackend;file:string;sha256:string;name:string;strength:number;triggerWords:string[];versionId?:number};
+  candidates?: LoraCandidate[];
   id: string; commandId: string; templateId: 'pet-2d'; templateVersion: number; name: string; description: string;
   characterPrompt: string; negativePrompt: string; seed: number; settings: WorkshopSettings;
   status: WorkshopStatus; characters: CharacterAsset[]; characterId?: string; characterConfirmed: boolean;
@@ -69,9 +84,19 @@ export interface WorkshopProject {
 export interface WorkshopSkin { id: string; name: string; projectId: string; createdAt: number; manifest: SkinData['manifest']; thumbnail: string }
 export interface WorkshopSnapshot {
   settings: WorkshopSettings; environment: ComfyEnvironment; projects: WorkshopProject[]; skins: WorkshopSkin[];
-  selectedSkinId: string | null; activeProjectId?: string;
+  selectedSkinId: string | null; activeProjectId?: string; civitaiKeySaved?: boolean;
 }
 export type WorkshopAction =
+  | { type:'workshop.parameters'; id:string; parameters:Partial<WorkshopParameters> }
+  | { type:'workshop.character.settings'; id:string; settings:CharacterSettings }
+  | { type:'workshop.civitai.key'; apiKey:string }
+  | { type:'workshop.civitai.clear' }
+  | { type:'workshop.lora.import'; id:string }
+  | { type: 'workshop.assistant.send'; id:string; text:string; profileId:string }
+  | { type: 'workshop.assistant.stop'|'workshop.undo'|'workshop.draft.apply'|'workshop.lora.clear'|'workshop.lora.cancel'; id:string }
+  | { type: 'workshop.lora.search'; id:string; query:string }
+  | { type: 'workshop.lora.install'; id:string; versionId:number }
+  | { type: 'workshop.lora.weight'; id:string; strength:number }
   | { type: 'workshop.settings'; settings: WorkshopSettings }
   | { type: 'workshop.check' }
   | { type: 'workshop.create'; commandId: string; name: string; description?: string }
@@ -98,3 +123,4 @@ export const WORKSHOP_STATUS: Record<WorkshopStatus, string> = {
   draft: '角色设定', character: '正在绘制角色', 'awaiting-character': '确认角色', queued: '排队中', running: '制作中', stopping: '正在收尾', paused: '已暂停',
   review: '等待预览确认', 'needs-attention': '有动作需要处理', completed: '已完成', cancelled: '已取消', error: '制作遇到问题',
 };
+export interface LoraCandidate { preview?:string; suggestedStrength?:number; backend?:CharacterBackend; versionId:number; name:string; author:string; baseModel:string; triggerWords:string[]; description:string; url:string; sizeKB:number; sha256:string; downloadUrl:string; compatible:boolean }

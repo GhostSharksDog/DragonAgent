@@ -1,6 +1,6 @@
 {
   "name": "dragon-agent",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "银白龙娘 · TypeScript 桌面 Agent 工作台",
   "main": "dist/main/index.cjs",
@@ -12,6 +12,8 @@
     "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
     "test:ui": "node scripts/ui-check.mjs",
+    "test:drop": "node scripts/drop-check.mjs",
+    "test:civitai": "node scripts/civitai-key-check.mjs",
     "smoke": "node scripts/smoke.mjs",
     "prepare:runtime": "tsx scripts/prepare-runtime.ts",
     "package": "npm run build && npm run prepare:runtime && node scripts/stage.mjs && npm ci --omit=dev --ignore-scripts --prefix .cache/package-app --cache .cache/npm && node scripts/package.mjs"
@@ -24,6 +26,9 @@
     "pdf-parse": "2.4.5",
     "react": "19.3.1",
     "react-dom": "19.3.1",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1",
     "sharp": "^0.35.5",
     "yazl": "^3.3.1"
   },
@@ -45,7 +50,7 @@
     "appId": "local.dragonagent.desktop",
     "productName": "DragonAgent",
     "directories": {
-      "output": "release/0.3.0"
+      "output": "release/0.4.0"
     },
     "files": [
       "dist/**/*",

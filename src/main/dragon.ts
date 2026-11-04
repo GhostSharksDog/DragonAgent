@@ -3,7 +3,7 @@ import type { AgentBackend, AgentSession, AppSettings, BackendHooks, BackendStat
 import type { AgentEvent, AgentRecord, Grant } from '../../packages/agent-core/src';
 import type { DynamicTool, ToolOutput } from '../pet/shared/tools';
 import { sanitizeDiagnostic } from '../pet/main/agent/transport';
-import { DRAGON_PERSONA } from '../shared/persona';
+import { assistantPrompt } from '../shared/persona';
 import os from 'node:os';
 export interface ToolBridge {
   bindTools(session: AgentSession, hooks: BackendHooks, signal: AbortSignal): Promise<DynamicTool[]>;
@@ -20,6 +20,8 @@ export class DragonBackend implements AgentBackend, ToolBridge {
   private incoming = new Map<string, AbortController>();
   constructor(private options: { home: string; workerPath: string; settings(): AppSettings; key(id: string): Promise<string>; definitions(): DynamicTool[]; tool(agent: AgentRecord, name: string, args: unknown, signal: AbortSignal): Promise<ToolOutput>; state(v: BackendState): void; mcp(v: McpStatus): void; agent(sessionId: string, task: AgentTask): void }) {}
   async start() { if (this.ready) return; if (!this.starting) this.starting = this.boot().finally(() => { this.starting = null; }); return this.starting; }
+  async checkpoint(sessionId: string, checkpoint: string) { await this.start(); await this.rpc('checkpoint',{sessionId,checkpoint}); }
+  async restore(sessionId: string, checkpoint: string) { await this.start(); await this.rpc('restore',{sessionId,checkpoint}); }
   async reconnectMcp() {
     if (!this.ready) return this.start();
     const servers = await Promise.all(this.options.settings().mcp.map(async s => ({ ...s, key: await this.options.key(`mcp:${s.id}`) })));
@@ -59,7 +61,7 @@ export class DragonBackend implements AgentBackend, ToolBridge {
         let result: unknown;
         if (message.kind === 'tool') result = await this.options.tool(message.agent, message.params.name, message.params.arguments, signal);
         else if (message.kind === 'question') result = await b.hooks.request({ id: message.request, kind: 'question', title: `${prefix}需要你的回答`, details: '', questions: message.params.questions }, signal);
-        else result = await b.hooks.request({ id: message.request, kind: 'approval', title: prefix + message.params.title, details: message.params.details }, signal);
+        else result = await b.hooks.request({ id: message.request, kind: 'approval', toolId: message.params.callId ? message.agent.title==='Codex 工具通道'?message.params.callId:`${message.agent.id}:${message.params.callId}` : undefined, title: prefix + message.params.title, details: message.params.details }, signal);
         signal.throwIfAborted(); this.worker?.postMessage({ reply: message.request, result });
       } catch (error) { this.worker?.postMessage({ reply: message.request, error: sanitizeDiagnostic((error as Error).message) }); }
       finally { this.incoming.delete(message.request); } return;
@@ -75,11 +77,11 @@ export class DragonBackend implements AgentBackend, ToolBridge {
     if (e.type === 'compacted') b.hooks.notice('上下文已压缩；完整原始记录保存在本地。');
     if (e.type === 'notice') b.hooks.notice(e.text);
   }
-  async run(session: AgentSession, prompt: string, hooks: BackendHooks, signal: AbortSignal) {
+  async run(session: AgentSession, prompt: string, hooks: BackendHooks, signal: AbortSignal, limits?: AppSettings['limits']) {
     await this.start(); signal.throwIfAborted(); this.bindings.set(session.id, { session, hooks, signal });
     const cancel = () => { void this.cancel(session).catch(() => undefined); }; signal.addEventListener('abort', cancel, { once: true });
     try {
-      const result = await this.rpc('run', { sessionId: session.id, runId: session.runId, profileId: session.profileId, prompt, system: DRAGON_PERSONA + `\n当前权限等级：${session.permissionMode ?? 'ask'}。auto 自动批准已授权范围内的操作，full 允许其他目录和网站。`, grant: sessionGrant(session), limits: this.options.settings().limits, compact: prompt === '/compact' }, 0);
+      const result = await this.rpc('run', { sessionId: session.id, runId: session.runId, profileId: session.profileId, prompt, system: assistantPrompt(this.options.settings().assistant) + `\n当前权限等级：${session.permissionMode ?? 'ask'}。auto 自动批准已授权范围内的操作，full 允许其他目录和网站。`, grant: sessionGrant(session), limits: limits ?? this.options.settings().limits, compact: prompt === '/compact' }, 0);
       if (result.status === 'paused') { const error = new Error(result.error ?? '达到调用预算'); error.name = 'BudgetExceeded'; throw error; }
       if (result.status === 'error') throw new Error(result.error ?? 'Agent 执行失败。');
     } finally { signal.removeEventListener('abort', cancel); this.bindings.delete(session.id); }
@@ -88,7 +90,7 @@ export class DragonBackend implements AgentBackend, ToolBridge {
     await this.start(); signal.throwIfAborted(); this.bindings.set(session.id, { session, hooks, signal });
     return (await this.rpc('bind', { id: session.id, runId: session.runId, grant: sessionGrant(session) })).map((d: any) => ({ name: d.name, description: d.description, inputSchema: d.parameters }));
   }
-  async callTool(session: AgentSession, name: string, args: unknown, _callId: string): Promise<ToolOutput> { const result = await this.rpc('tool', { id: session.id, name, arguments: args }, 0); return { success: !result.isError, contentItems: [{ type: 'inputText', text: result.text }, ...(result.images ?? []).map((imageUrl: string) => ({ type: 'inputImage', imageUrl }))] }; }
+  async callTool(session: AgentSession, name: string, args: unknown, callId: string): Promise<ToolOutput> { const result = await this.rpc('tool', { id: session.id, name, arguments: args, callId }, 0); return { success: !result.isError, contentItems: [{ type: 'inputText', text: result.text }, ...(result.images ?? []).map((imageUrl: string) => ({ type: 'inputImage', imageUrl }))] }; }
   async unbindTools(session: AgentSession) { this.bindings.delete(session.id); if (this.worker) await this.rpc('unbind', { id: session.id }); }
   async cancel(session: AgentSession, agentId?: string) { if (this.worker) await this.rpc('cancel', { sessionId: session.id, agentId }); }
   async approveTool(agent: AgentRecord, title: string, details: string): Promise<boolean> { return this.rpc('approveTool', { sessionId: agent.sessionId, agentId: agent.id, title, details }, 0); }

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ComfyEnvironment, ComfyFile, ComfyOperation, WorkshopSettings } from '../../shared/workshop';
-import { WORKSHOP_LINKS } from '../../shared/workshop';
+import { WORKSHOP_LINKS, characterSettings } from '../../shared/workshop';
 
 export type Graph = Record<string, { class_type: string; inputs: Record<string, unknown> }>;
 export type NodeCatalog = Record<string, { input: { required?: Record<string, any[]>; optional?: Record<string, any[]> } }>;
@@ -33,7 +33,7 @@ export class ComfyClient {
       try { return text.trim() ? JSON.parse(text) : {}; } catch { throw new ComfyError('ComfyUI 返回的 JSON 无效。', 'invalid'); }
     } catch (error) { if (error instanceof ComfyError || signal?.aborted) throw error; throw new ComfyError(`无法连接本机 ComfyUI（${this.endpoint}）。请确认服务已启动，地址和端口正确。`); }
   }
-  async inspect(settings: WorkshopSettings): Promise<ComfyEnvironment> {
+  async inspect(settings: WorkshopSettings, stage: 'all' | 'character' | 'video' | 'matte' = 'all'): Promise<ComfyEnvironment> {
     const out: ComfyEnvironment = { endpoint: this.endpoint, status: 'offline', issues: [], checkpoints: [], checkedAt: Date.now() };
     try {
       const [stats, catalog] = await Promise.all([this.json('/system_stats'), this.json('/object_info')]);
@@ -43,16 +43,28 @@ export class ComfyClient {
         const value = catalog[node]?.input?.required?.[key]?.[0] ?? catalog[node]?.input?.optional?.[key]?.[0];
         return Array.isArray(value) ? value.filter(v => typeof v === 'string') : [];
       };
-      const base = ['LoadImage', 'SaveImage', 'CLIPTextEncode', 'KSampler', 'CheckpointLoaderSimple', 'EmptyLatentImage', 'UNETLoader', 'CLIPLoader', 'VAELoader', 'ModelSamplingSD3', 'Wan22ImageToVideoLatent', 'VAEDecodeTiled', 'ImageBatch', 'BiRefNetRMBG'];
+      const characterNodes = ['SaveImage','CLIPTextEncode','KSampler','EmptyLatentImage','VAEDecodeTiled', ...(characterSettings(settings).backend === 'anima' ? ['UNETLoader','CLIPLoader','VAELoader'] : ['CheckpointLoaderSimple'])];
+      const videoNodes = ['LoadImage','SaveImage','CLIPTextEncode','KSampler','UNETLoader','CLIPLoader','VAELoader','ModelSamplingSD3','Wan22ImageToVideoLatent','VAEDecodeTiled'];
+      const matteNodes = ['LoadImage','SaveImage','ImageBatch','BiRefNetRMBG'];
+      const base = [...new Set(stage === 'character' ? characterNodes : stage === 'video' ? videoNodes : stage === 'matte' ? matteNodes : [...characterNodes,...videoNodes,...matteNodes])];
       for (const node of base) if (!catalog[node]) out.issues.push({ name: node, detail: node === 'BiRefNetRMBG' ? '请安装 ComfyUI-RMBG 节点并重启 ComfyUI。' : '缺少工作流节点，请更新 ComfyUI 后重试。', severity: 'error', url: node === 'BiRefNetRMBG' ? WORKSHOP_LINKS.rmbg : WORKSHOP_LINKS.install });
       out.checkpoints = choices('CheckpointLoaderSimple', 'ckpt_name');
+      const c=characterSettings(settings);
+      const characterModels: [string,boolean,string,string][] = c.backend==='anima' ? [
+        [c.model,choices('UNETLoader','unet_name').includes(c.model),'https://huggingface.co/circlestone-labs/Anima','models/diffusion_models'],
+        [c.encoder,choices('CLIPLoader','clip_name').includes(c.encoder),'https://huggingface.co/circlestone-labs/Anima','models/text_encoders'],
+        [c.vae,choices('VAELoader','vae_name').includes(c.vae),'https://huggingface.co/circlestone-labs/Anima','models/vae'],
+      ] : [[c.model,out.checkpoints.includes(c.model),WORKSHOP_LINKS.character,'models/checkpoints']];
       for (const [name, present, url, folder] of [
-        [settings.checkpoint, out.checkpoints.includes(settings.checkpoint), WORKSHOP_LINKS.character, 'models/checkpoints'],
+        ...(['all','character'].includes(stage) ? characterModels : []),
         [settings.videoModel, choices('UNETLoader', 'unet_name').includes(settings.videoModel), WORKSHOP_LINKS.wan, 'models/diffusion_models'],
         [settings.textEncoder, choices('CLIPLoader', 'clip_name').includes(settings.textEncoder), WORKSHOP_LINKS.wan, 'models/text_encoders'],
         [settings.vae, choices('VAELoader', 'vae_name').includes(settings.vae), WORKSHOP_LINKS.wan, 'models/vae'],
         [settings.matteModel, choices('BiRefNetRMBG', 'model').includes(settings.matteModel), WORKSHOP_LINKS.matte, 'ComfyUI-RMBG'],
-      ] as const) if (!present) out.issues.push({ name, detail: `未发现此模型选项，请放入 ${folder} 并刷新检测。`, severity: 'error', url });
+      ] as const) {
+        const needed = characterModels.some(m=>m[0]===name) ? ['all','character'].includes(stage) : name===settings.matteModel ? ['all','matte'].includes(stage) : ['all','video'].includes(stage);
+        if (needed && !present) out.issues.push({ name, detail: `未发现此模型选项，请放入 ${folder} 并刷新检测。`, severity: 'error', url });
+      }
       if (choices('BiRefNetRMBG', 'model').includes(settings.matteModel)) out.issues.push({ name: '抠图模型文件', detail: '节点已识别；权重是否缓存需首次运行确认。缺失时节点可能下载权重。', severity: 'warning', url: WORKSHOP_LINKS.matte });
       const gpu = stats.devices.find((d: any) => d.type === 'cuda') ?? stats.devices[0];
       Object.assign(out, { gpu: String(gpu?.name ?? '未知设备'), vramTotal: finite(gpu?.vram_total), vramFree: finite(gpu?.vram_free), ramTotal: finite(stats.system?.ram_total), ramFree: finite(stats.system?.ram_free), version: String(stats.system?.comfyui_version ?? ''), supportsTargetedCancel: false });
@@ -65,6 +77,14 @@ export class ComfyClient {
     for (const node of Object.values(graph)) {
       const spec = this.catalog[node.class_type]; if (!spec) throw new ComfyError(`缺少节点 ${node.class_type}，请重新检测环境。`, 'invalid');
       const all = { ...spec.input.required, ...spec.input.optional };
+      // ComfyUI publishes OS-native model paths. Resolve the exact catalog spelling.
+      for (const [key, value] of Object.entries(node.inputs)) {
+        const choices = all[key]?.[0];
+        if (typeof value === 'string' && Array.isArray(choices) && !choices.includes(value)) {
+          const match = choices.find(v => typeof v === 'string' && v.replaceAll('\\', '/') === value.replaceAll('\\', '/'));
+          if (match !== undefined) node.inputs[key] = match;
+        }
+      }
       for (const key of Object.keys(node.inputs)) if (!all[key]) delete node.inputs[key];
       for (const [key, value] of Object.entries(spec.input.required ?? {})) if (!(key in node.inputs)) {
         if (value[1] && 'default' in value[1]) node.inputs[key] = value[1].default;
