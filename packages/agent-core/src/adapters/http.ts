@@ -1,3 +1,4 @@
+import { providerUsage } from '../usage.js';
 import type { Message, ModelAdapter, ModelRequest, ModelResponse, ToolCall } from '../types.js';
 
 export class ModelHttpError extends Error {
@@ -39,7 +40,10 @@ export function serialize(request: ModelRequest): { url: string; body: Record<st
   const { profile: p, messages, tools, maxOutput, key } = request;
   const root = p.baseUrl.replace(/\/+$/, ''), headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'text/event-stream' };
   if (key) headers.Authorization = `Bearer ${key}`;
-  if (p.protocol === 'openai-completions') return { url: `${root}/chat/completions`, headers, body: { model: p.model, stream: true, stream_options: { include_usage: true }, max_tokens: maxOutput, messages: chatMessages(messages, p), ...(tools.length ? { tools: tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } })) } : {}) } };
+  // DeepSeek 思考模式：none 关闭思考；low/high/max 是官方文档给出的实际档位。其他服务商不发送这些扩展参数。
+  const effort = /deepseek/i.test(p.baseUrl) || /deepseek/i.test(p.model) ? request.reasoningEffort : undefined;
+  const reasoning = effort === 'none' ? { thinking: { type: 'disabled' } } : effort ? { thinking: { type: 'enabled' }, reasoning_effort: effort } : {};
+  if (p.protocol === 'openai-completions') return { url: `${root}/chat/completions`, headers, body: { model: p.model, stream: true, stream_options: { include_usage: true }, max_tokens: maxOutput, messages: chatMessages(messages, p), ...reasoning, ...(tools.length ? { tools: tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } })) } : {}) } };
   if (p.protocol === 'openai-responses') {
     const input = messages.flatMap((m): any[] => {
       if (m.role === 'tool') return [{ type: 'function_call_output', call_id: m.callId, output: m.images?.length ? [{ type: 'input_text', text: m.text || '工具图像结果' }, ...m.images.map(image_url => ({ type: 'input_image', image_url }))] : m.text }];
@@ -61,31 +65,48 @@ export class HttpModelAdapter implements ModelAdapter {
   constructor(private transport: typeof fetch = fetch) {}
   async generate(request: ModelRequest): Promise<ModelResponse> {
     const { url, headers, body } = serialize(request), signal = AbortSignal.any([request.signal, AbortSignal.timeout(180000)]);
+    const requestStartedAt = Date.now();
     const response = await this.transport(url, { method: 'POST', headers, body: JSON.stringify(body), signal });
     if (!response.ok) { await response.body?.cancel(); throw new ModelHttpError(`模型 API 请求失败（HTTP ${response.status}）。请检查地址、模型、密钥与额度。`, response.status); }
     if (!response.body) throw new Error('模型 API 返回空响应。');
     const result: ModelResponse = { message: { role: 'assistant', text: '' }, usage: { input: 0, output: 0 }, finish: 'stop' };
-    const calls = new Map<number, ToolCall>(), native: any[] = []; let finished = false, reasoning = '';
-    const addText = (value: string) => { result.message.text += value; request.onText(value); };
+    const calls = new Map<number, ToolCall>(), native: any[] = []; let finished = false, reasoning = '', inputReported=false;
+    let firstOutputAt: number | undefined;
+    const markOutput = () => {
+  firstOutputAt ??= Date.now();
+};
+    const addText = (value: string) => {
+  if (value) markOutput();
+  result.message.text += value;
+  request.onText(value);
+};
     for await (const e of sse(response.body, signal)) {
       if (e.error || e.type === 'error' || e.type === 'response.failed') throw new Error('模型流报告执行失败。');
       if (request.profile.protocol === 'openai-completions') {
         const choice = e.choices?.[0], delta = choice?.delta;
         if (delta?.content) addText(delta.content);
         if (delta?.refusal) addText(delta.refusal);
-        if (delta?.reasoning_content) reasoning += delta.reasoning_content;
+        if (delta?.reasoning_content) {
+  markOutput();
+  reasoning += delta.reasoning_content;
+}
         for (const c of delta?.tool_calls ?? []) { const call = calls.get(c.index) ?? { id: '', name: '', arguments: '' }; call.id ||= c.id ?? ''; call.name += c.function?.name ?? ''; call.arguments += c.function?.arguments ?? ''; calls.set(c.index, call); }
         if (choice?.finish_reason) { finished = true; result.finish = choice.finish_reason === 'length' ? 'length' : choice.finish_reason === 'tool_calls' ? 'tools' : 'stop'; }
-        if (e.usage) result.usage = { input: e.usage.prompt_tokens ?? 0, output: e.usage.completion_tokens ?? 0 };
+       if (e.usage) {
+  result.usage = providerUsage(
+    e.usage,
+    request.profile.protocol
+  );
+}
       } else if (request.profile.protocol === 'openai-responses') {
         if (e.type === 'response.output_text.delta') addText(e.delta);
         if (e.type === 'response.refusal.delta') addText(e.delta);
         if (e.type === 'response.output_item.added') { native[e.output_index] = e.item; if (e.item.type === 'function_call') calls.set(e.output_index, { id: e.item.call_id, name: e.item.name, arguments: e.item.arguments ?? '' }); }
         if (e.type === 'response.function_call_arguments.delta') { const call = calls.get(e.output_index); if (!call) throw new Error('模型工具调用缺少开始事件。'); call.arguments += e.delta; }
         if (e.type === 'response.output_item.done') { native[e.output_index] = e.item; if (e.item.type === 'function_call') calls.set(e.output_index, { id: e.item.call_id, name: e.item.name, arguments: e.item.arguments }); }
-        if (e.type === 'response.completed' || e.type === 'response.incomplete') { finished = true; result.finish = e.type === 'response.incomplete' ? 'length' : calls.size ? 'tools' : 'stop'; if (e.response?.output) native.splice(0, native.length, ...e.response.output); result.usage = { input: e.response?.usage?.input_tokens ?? 0, output: e.response?.usage?.output_tokens ?? 0 }; }
+        if (e.type === 'response.completed' || e.type === 'response.incomplete') { finished = true; result.finish = e.type === 'response.incomplete' ? 'length' : calls.size ? 'tools' : 'stop'; if (e.response?.output) native.splice(0, native.length, ...e.response.output); result.usage = providerUsage(e.response?.usage, request.profile.protocol); }
       } else {
-        if (e.type === 'message_start') result.usage.input = (e.message?.usage?.input_tokens ?? 0) + (e.message?.usage?.cache_creation_input_tokens ?? 0) + (e.message?.usage?.cache_read_input_tokens ?? 0);
+        if (e.type === 'message_start') {result.usage = providerUsage(e.message?.usage, request.profile.protocol);inputReported=Number.isSafeInteger(e.message?.usage?.input_tokens)&&e.message.usage.input_tokens>=0;}
         if (e.type === 'content_block_start') { native[e.index] = e.content_block; if (e.content_block.type === 'tool_use') calls.set(e.index, { id: e.content_block.id, name: e.content_block.name, arguments: '' }); }
         if (e.type === 'content_block_delta') {
           const block = native[e.index]; if (!block) throw new Error('模型内容缺少开始事件。');
@@ -95,7 +116,7 @@ export class HttpModelAdapter implements ModelAdapter {
           if (e.delta.type === 'signature_delta') block.signature = (block.signature ?? '') + e.delta.signature;
         }
         if (e.type === 'content_block_stop' && calls.has(e.index)) { const call = calls.get(e.index)!; call.arguments ||= JSON.stringify(native[e.index].input ?? {}); native[e.index].input = JSON.parse(call.arguments); }
-        if (e.type === 'message_delta') { result.usage.output = e.usage?.output_tokens ?? result.usage.output; result.finish = e.delta?.stop_reason === 'max_tokens' ? 'length' : e.delta?.stop_reason === 'tool_use' ? 'tools' : 'stop'; }
+        if (e.type === 'message_delta') { result.usage.output = e.usage?.output_tokens ?? result.usage.output; if (e.usage?.output_tokens !== undefined) result.usage.reported = inputReported; result.finish = e.delta?.stop_reason === 'max_tokens' ? 'length' : e.delta?.stop_reason === 'tool_use' ? 'tools' : 'stop'; }
         if (e.type === 'message_stop') finished = true;
       }
       if ([...calls.values()].some(c => c.arguments.length > 1048576)) throw new Error('模型工具参数过大。');
@@ -105,6 +126,16 @@ export class HttpModelAdapter implements ModelAdapter {
     if (result.message.calls.some(c => !c.id || !c.name)) throw new Error('模型工具调用缺少名称或 ID。');
     if (reasoning) result.message.replay = { profileId: request.profile.id, configuration: configuration(request.profile), value: { reasoning_content: reasoning } };
     if (native.length) result.message.replay = { profileId: request.profile.id, configuration: configuration(request.profile), value: native.filter(Boolean) };
+
+    if (result.usage.output > 0) {
+  const elapsed = Math.max(
+    1,
+    Date.now() - (firstOutputAt ?? requestStartedAt)
+  );
+
+  result.usage.tokensPerSecond =
+    result.usage.output * 1000 / elapsed;
+}
     return result;
   }
 }

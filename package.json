@@ -1,6 +1,6 @@
 {
   "name": "dragon-agent",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "private": true,
   "description": "银白龙娘 · TypeScript 桌面 Agent 工作台",
   "main": "dist/main/index.cjs",
@@ -14,9 +14,16 @@
     "test:ui": "node scripts/ui-check.mjs",
     "test:drop": "node scripts/drop-check.mjs",
     "test:civitai": "node scripts/civitai-key-check.mjs",
+    "test:illustration-layout": "node scripts/illustration-layout-check.mjs",
+    "test:illustration-agent": "tsx scripts/illustration-agent-check.mjs",
+    "test:composer": "node scripts/composer-draft-check.mjs",
+    "test:reasoning": "node scripts/reasoning-check.mjs",
+    "test:context-bar": "node scripts/context-bar-check.mjs",
     "smoke": "node scripts/smoke.mjs",
     "prepare:runtime": "tsx scripts/prepare-runtime.ts",
-    "package": "npm run build && npm run prepare:runtime && node scripts/stage.mjs && npm ci --omit=dev --ignore-scripts --prefix .cache/package-app --cache .cache/npm && node scripts/package.mjs"
+    "package": "npm run build && npm run prepare:runtime && node scripts/stage.mjs && npm ci --omit=dev --ignore-scripts --prefix .cache/package-app --cache .cache/npm && node scripts/package.mjs",
+    "test:workbench": "node --import tsx scripts/workbench060-check.mjs",
+    "test:queue": "node scripts/queue060-check.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
@@ -50,7 +57,7 @@
     "appId": "local.dragonagent.desktop",
     "productName": "DragonAgent",
     "directories": {
-      "output": "release/0.4.0"
+      "output": "release/0.6.0"
     },
     "files": [
       "dist/**/*",

@@ -1,4 +1,5 @@
 import type { DynamicTool, ToolContext, ToolOutput } from '../../shared/tools';
+import { ToolDenied } from './policy';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { BrowserTools, browserDefinitions, type BrowserOptions } from './browser';
 import { FileTools, fileDefinitions, type FileOptions } from './files';
@@ -32,7 +33,7 @@ export class ToolHost {
   async call(name: string, args: unknown): Promise<ToolOutput> {
     // Serial execution prevents approval/overwrite races between assistant tool calls.
     const taskId = this.context.getTaskId?.() ?? null;
-    const run = this.queue.then(() => this.taskScope.run({ taskId }, async () => {
+    const work = () => this.taskScope.run({ taskId }, async () => {
       if (this.disposed) throw new Error('工具会话已结束。');
       if (this.context.getTaskId && (!taskId || this.context.getTaskId() !== taskId)) throw new Error('原任务已停止或切换，此操作已取消。');
       if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('工具参数必须是对象。');
@@ -43,10 +44,12 @@ export class ToolHost {
         if (item?.data && item.mimeType === 'image/png') return { contentItems: [{ type: 'inputImage' as const, imageUrl: `data:image/png;base64,${item.data}` }], success: true };
       }
       return { contentItems: [{ type: 'inputText' as const, text: typeof result === 'string' ? result : JSON.stringify(result, null, 2) }], success: true };
-    }));
-    this.queue = run.catch(() => undefined);
+    });
+    const readOnly=/^pet_files_(list|read|search)$/.test(name);
+    const run=readOnly?work():this.queue.then(work);
+    if(!readOnly)this.queue = run.catch(() => undefined);
     try { return await run; }
-    catch (error) { return { contentItems: [{ type: 'inputText', text: error instanceof Error ? error.message : '操作失败。' }], success: false }; }
+    catch (error) { return { errorKind:error instanceof ToolDenied?'denied':this.disposed||this.context.getTaskId&&this.context.getTaskId()!==taskId?'cancelled':/^pet_files_(list|read|search)$|^pet_task_scope$/.test(name)?(error as Error).name==='TimeoutError'?'timeout':'service':'unknown', contentItems: [{ type: 'inputText', text: error instanceof Error ? error.message : '操作失败。' }], success: false }; }
   }
   async connectBrowser(config?: BrowserConnectionConfig) { await this.browser.connect(config); }
   async disconnectBrowser() { await this.browser.disconnect(); }

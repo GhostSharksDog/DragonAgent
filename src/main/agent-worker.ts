@@ -44,12 +44,12 @@ async function dispatch(method: string, args: any) {
   if (method === 'init') {
     stateHome = args.home;
     registry = new ToolRegistry(); store = new SqliteSessionStore(path.join(args.home, 'agent-core.db'));
-    for (const d of args.definitions) registry.register({ name: d.name, description: d.description, parameters: d.inputSchema, approval: 'managed', effect: d.name.startsWith('pet_files_') && ['list', 'read', 'search'].some(s => d.name.endsWith(`_${s}`)) || d.name === 'pet_task_scope' || d.name === 'pet_attachment_read' || d.name==='pet_memory_read' ? 'read' : 'unknown', execute: async (input, ctx) => {
+    for (const d of args.definitions) registry.register({ name: d.name, description: d.description, parameters: d.inputSchema, parallelSafe: d.name.startsWith('pet_files_') && ['list','read','search'].some(s=>d.name.endsWith('_'+s)), approval: 'managed', effect: d.name.startsWith('pet_files_') && ['list', 'read', 'search'].some(s => d.name.endsWith(`_${s}`)) || d.name === 'pet_task_scope' || d.name === 'pet_attachment_read' || d.name==='pet_memory_read' ? 'read' : 'unknown', execute: async (input, ctx) => {
       if (d.name.startsWith('pet_browser_') && ctx.agent.grant.approvalMode === 'ask' && !await ctx.approve(d.description, JSON.stringify(input))) return {isError:true,text:'用户拒绝了本次网页操作。'};
       const result = await host('tool', ctx.agent, { name: d.name, arguments: input }, ctx.signal);
-      return { text: result.contentItems.filter((v: any) => v.type === 'inputText').map((v: any) => v.text).join('\n'), images: result.contentItems.filter((v: any) => v.type === 'inputImage').map((v: any) => v.imageUrl), isError: !result.success };
+      return { errorKind:result.errorKind, facts:result.facts, text: result.contentItems.filter((v: any) => v.type === 'inputText').map((v: any) => v.text).join('\n'), images: result.contentItems.filter((v: any) => v.type === 'inputImage').map((v: any) => v.imageUrl), isError: !result.success };
     } });
-    engine = new AgentRuntime({ profiles: () => args.profiles, key: async id => args.keys[id], store, tools: registry, adapter: new HttpModelAdapter(), event: event => { if (event.type === 'agent') send({ event: 'core', data: { ...event, agent: { ...event.agent, messages: [] } } }); else send({ event: 'core', data: event }); }, approve: (agent, request, signal) => host('approval', agent, request, signal), question: (agent, questions, signal) => host('question', agent, { questions }, signal) });
+    engine = new AgentRuntime({ lazyTools:true, profiles: () => args.profiles, key: async id => args.keys[id], store, tools: registry, adapter: new HttpModelAdapter(), event: event => { if (event.type === 'agent') send({ event: 'core', data: { ...event, agent: { ...event.agent, messages: [] } } }); else send({ event: 'core', data: event }); }, approve: (agent, request, signal) => host('approval', agent, request, signal), question: (agent, questions, signal) => host('question', agent, { questions }, signal) });
     registerBasicTools(registry); registerVision(registry,args.profiles); registerWebRead(registry);
     registerDeepSeekSearch(registry,args.profiles,args.selectedProfile,id=>args.keys[id]);
     mcp = new McpManager(registry, status => send({ event: 'mcp', data: status }), args.home);
@@ -74,9 +74,9 @@ async function dispatch(method: string, args: any) {
   if (method === 'bind') {
     const agent: AgentRecord = { id: args.id, rootId: args.id, runId: args.runId, sessionId: args.id, title: 'Codex 工具通道', profileId: '', grant: args.grant, messages: [], status: 'running', requests: 0, usage: { input: 0, output: 0 }, createdAt: Date.now(), updatedAt: Date.now() };
     external.set(args.id, { agent, controller: new AbortController() });
-    return registry.schemas().filter(d => !d.name.startsWith('agent_') && !['ask_user', 'pet_terminal', 'todo_write', 'attachment_read', 'image_analyze'].includes(d.name));
+    return registry.schemas().filter(d => !d.name.startsWith('agent_') && !['ask_user', 'pet_terminal', 'todo_write', 'attachment_read', 'image_analyze', 'tool_search', 'tool_load'].includes(d.name));
   }
-  if (method === 'tool') { const scope = external.get(args.id); if (!scope) throw new Error('工具会话未连接。'); if (!registry.schemas().some(d => d.name === args.name) || /^(agent_|ask_user$|pet_terminal$|todo_write$|attachment_read$)/.test(args.name)) throw new Error('工具不在此通道的范围内。'); scope.callId=args.callId;try{return await registry.call(args.name, args.arguments, context(scope.agent, scope.controller.signal,args.callId));}finally{scope.callId=undefined;} }
+  if (method === 'tool') { const scope = external.get(args.id); if (!scope) throw new Error('工具会话未连接。'); if (!registry.schemas().some(d => d.name === args.name) || /^(agent_|ask_user$|pet_terminal$|todo_write$|attachment_read$|image_analyze$|tool_search$|tool_load$)/.test(args.name)) throw new Error('工具不在此通道的范围内。'); scope.callId=args.callId;try{return await registry.call(args.name, args.arguments, context(scope.agent, scope.controller.signal,args.callId));}finally{scope.callId=undefined;} }
   if (method === 'unbind') { external.get(args.id)?.controller.abort(); external.delete(args.id); return true; }
   if (method === 'dispose') { await engine?.dispose(); await mcp?.dispose(); store?.close(); return true; }
   throw new Error('未知内核操作。');

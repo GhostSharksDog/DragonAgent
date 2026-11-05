@@ -81,6 +81,7 @@ Codex 是可选的外部通道：在设置中登录账号后，通过模型菜�
 - `node scripts/workshop-ui-check.mjs`：工坊浅深主题、最小窗口、100%/150% 缩放、预览及桌宠应用的 Electron 集成验收。
 - `pnpm test`：协议、并行/取消、授权、预算、压缩、冲突写入、MCP 故障与迁移恢复。
 - `node scripts/drop-check.mjs`：真实 Electron 中把图片拖入输入框、粘贴图片、超限拒绝，并核对落盘 PNG。
+- `node scripts/illustration-layout-check.mjs`：角色插画页三列布局与滚动回归，含宽／窄两档截图。
 - `node scripts/civitai-key-check.mjs`：真实 Electron 中加密保存 Civitai 密钥，校验密文落盘、状态回显与清除。
 - `node scripts/ui-check.mjs`：真实 Electron + 本地模型服务，跨窗口草稿、重复发送、审批、子任务和落盘结果；截图在 `test-results`。
 - `node scripts/compositor-check.mjs`：浅色、深色背景上的 Windows 桌面透明合成检查。两种界面测试均可通过 `DRAGON_EXE` 指定发行版入口。

@@ -1,22 +1,54 @@
 export type Protocol = 'openai-completions' | 'openai-responses' | 'anthropic-messages';
 export interface ModelProfile { id: string; model: string; protocol: Protocol; baseUrl: string; contextWindow: number; maxOutput: number }
 export interface ToolCall { id: string; name: string; arguments: string }
+export interface ToolFacts { exitCode?:number; artifacts?:{path:string;size:number;modifiedAt:number}[] }
 export interface Message {
+  facts?:ToolFacts;
   role: 'system' | 'user' | 'assistant' | 'tool'; text: string; calls?: ToolCall[];
   callId?: string; name?: string; isError?: boolean; images?: string[];
   replay?: { profileId: string; configuration?: string; value: unknown };
 }
 export interface ToolSchema { name: string; description: string; parameters: Record<string, unknown> }
-export interface Usage { input: number; output: number; context?: number; window?: number; estimated?: boolean }
-export interface ModelRequest { profile: ModelProfile; key?: string; messages: Message[]; tools: ToolSchema[]; maxOutput: number; signal: AbortSignal; onText(text: string): void }
+
+export interface Usage {
+  input: number;
+  output: number;
+  context?: number;
+  window?: number;
+  estimated?: boolean;
+  calibrated?: boolean;
+  composition?: {
+    system: number;
+    tools: number;
+    history: number;
+    results: number;
+    images: number;
+    overhead: number;
+  };
+  cacheRead?: number;
+  cacheWrite?: number;
+  cacheMiss?: number;
+  reasoning?: number;
+  reported?: boolean;
+  tokensPerSecond?: number;
+}
+
+export interface RequestAttempt { retry?:number; id: string; profileId: string; startedAt: number; finishedAt?: number; purpose: 'response' | 'summary' | 'tool' | 'planning' | 'review'; status: 'started' | 'completed' | 'failed'; usage?: Usage; error?: string }
+export interface ModelRequest { profile: ModelProfile; key?: string; messages: Message[]; tools: ToolSchema[]; maxOutput: number; reasoningEffort?: string; signal: AbortSignal; onText(text: string): void }
 export interface ModelResponse { message: Message; usage: Usage; finish: 'stop' | 'tools' | 'length' }
 export interface ModelAdapter { generate(request: ModelRequest): Promise<ModelResponse>; countTokens?(request: Omit<ModelRequest, 'signal' | 'onText' | 'key'>): Promise<number> }
 export interface Grant { folders: string[]; origins: string[]; browserInput: boolean; terminal: boolean; approvalMode?: 'ask' | 'auto' | 'full'; allFolders?: boolean; allOrigins?: boolean }
-export interface Limits { concurrency: number; children: number; requests: number }
-export const DEFAULT_LIMITS: Limits = { concurrency: 3, children: 12, requests: 64 };
+export interface Limits { concurrency: number; children: number; requests: number | null }
+export const DEFAULT_LIMITS: Limits = { concurrency: 3, children: 12, requests: null };
 export type AgentStatus = 'queued' | 'running' | 'waiting' | 'completed' | 'cancelled' | 'error' | 'paused' | 'interrupted';
+export type TaskCheck = {kind:'tool-success';callId:string;toolName:string} | {kind:'command-exit';callId:string;exitCode:number} | {kind:'artifact-exists';callId:string;path:string} | {kind:'manual';description:string};
+export interface TaskStep { dependsOn?:string[];checks?:TaskCheck[]; id:string; title:string; status:'pending'|'running'|'awaiting-verification'|'completed'; evidenceRefs:string[] }
 export interface AgentRecord {
+  goal?:string;
+  evidence?:Record<string,{name:string;isError:boolean;facts?:ToolFacts}>;
+  steps?: TaskStep[];
   id: string; sessionId: string; runId: string; rootId: string; parentId?: string; title: string; profileId: string;
+  loadedTools?: string[];
   grant: Grant; messages: Message[]; status: AgentStatus; result?: string; error?: string;
   usage: Usage; requests: number; createdAt: number; updatedAt: number;
 }
@@ -24,6 +56,7 @@ export type AgentEvent = { seq?: number; agentId: string; sessionId: string; run
   | { type: 'agent'; agent: AgentRecord }
   | { type: 'text'; text: string }
   | { type: 'usage'; usage: Usage }
+  | { type: 'request'; attempt: RequestAttempt }
   | { type: 'tool.started'; call: ToolCall }
   | { type: 'tool.finished'; callId: string; result: ToolResult }
   | { type: 'approval.requested'; id: string; title: string; details: string }
@@ -38,7 +71,9 @@ export interface SessionStore {
   putAttachment(sessionId: string, content: string): Promise<string>;
   readAttachment(sessionId: string, id: string, offset: number, limit: number): Promise<string>;
 }
-export interface ToolResult { text: string; isError?: boolean; images?: string[] }
+export type ToolErrorKind = 'validation' | 'denied' | 'timeout' | 'cancelled' | 'service' | 'unknown';
+export interface ToolResult { facts?:ToolFacts; text: string; isError?: boolean; images?: string[]; errorKind?: ToolErrorKind }
+export interface ToolMiddleware { beforeExecute?(name: string, args: Readonly<Record<string, unknown>>, context: ToolContext): Promise<void>; afterExecute?(name: string, result: Readonly<ToolResult>, context: ToolContext): Promise<void> }
 export interface ToolContext {
   generate?(input: { profileId: string; messages: Message[]; maxOutput: number }): Promise<ModelResponse>;
   callId?: string;
@@ -49,6 +84,7 @@ export interface ToolContext {
 export interface ToolDefinition extends ToolSchema {
   effect: 'read' | 'write' | 'unknown' | 'control';
   approval?: 'managed';
+  parallelSafe?: boolean;
   authorize?(args: Record<string, unknown>, context: ToolContext): Promise<boolean> | boolean;
   execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult>;
 }
@@ -59,5 +95,7 @@ export interface RuntimeOptions {
   approve(agent: AgentRecord, request: { id: string; title: string; details: string; callId?: string }, signal: AbortSignal): Promise<boolean>;
   question(agent: AgentRecord, questions: { id: string; question: string; options?: string[] }[], signal: AbortSignal): Promise<Record<string, string>>;
   limits?: Limits;
+  lazyTools?: boolean;
+  toolFilter?(tool: ToolSchema, agent: AgentRecord): boolean;
 }
 export class BudgetExceeded extends Error { constructor(message = '任务树已达到模型请求预算，请确认后继续。') { super(message); this.name = 'BudgetExceeded'; } }

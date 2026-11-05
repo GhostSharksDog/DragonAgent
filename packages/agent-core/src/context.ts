@@ -12,6 +12,15 @@ export function estimateTokens(messages: Message[], tools: ToolSchema[]) {
   const textMessages=messages.map(m=>m.images?.length?{...m,images:m.images.map(()=> '[image]')}:m);
   return Buffer.byteLength(JSON.stringify({messages:textMessages,tools}),'utf8')+images*32768+256+messages.length*32+tools.length*64;
 }
+/** Composition uses the same conservative estimator; it is not provider billing. */
+export function contextComposition(messages:Message[],tools:ToolSchema[]) {
+  const base=estimateTokens([],[]),plain=messages.map(m=>({...m,images:undefined}));
+  return {system:estimateTokens(plain.filter(m=>m.role==='system'),[])-base,
+    tools:estimateTokens([],tools)-base,
+    history:estimateTokens(plain.filter(m=>m.role!=='system'&&m.role!=='tool'),[])-base,
+    results:estimateTokens(plain.filter(m=>m.role==='tool'),[])-base,
+    images:messages.reduce((n,m)=>n+(m.images?.length??0)*32768,0),overhead:base};
+}
 /** Keep assistant tool calls and every matching result in one indivisible history block. */
 export function historyGroups(messages: Message[]): Message[][] {
   const groups: Message[][] = [];

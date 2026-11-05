@@ -1,3 +1,4 @@
+import { illustrationDefinitions } from './illustration/tools';
 import { captureVersion, rememberVersion, applyVersion } from './versions';
 import {routeChat} from './chat-routing';
 import { validAssistantPreferences } from '../shared/persona';
@@ -9,7 +10,7 @@ import { EventEmitter } from 'node:events';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync } from 'node:fs';
 import packageInfo from '../../package.json';
-import { randomUUID } from 'node:crypto';
+import { randomUUID,createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { access, mkdir, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
@@ -30,6 +31,7 @@ import { validLimits } from '../../packages/agent-core/src/runtime';
 import type { AgentRecord } from '../../packages/agent-core/src/types';
 
 export class Runtime extends EventEmitter {
+  illustration?: {create(description:string,commandId:string):Promise<unknown>;list():unknown};
   state: PersistentState;
   view: Omit<Snapshot, keyof PersistentState>;
   readonly dragon: DragonBackend;
@@ -48,11 +50,11 @@ export class Runtime extends EventEmitter {
   constructor(readonly store: Store, readonly secrets: Secrets, readonly options: { home: string; version?: string; workerPath: string; open(url: string): Promise<void> }) {
     super(); this.state = store.load(); this.attachments = new Attachments(options.home);
     this.view = { codexCatalog: { status: 'idle', models: [] }, resolvedTheme: this.state.settings.theme === 'dark' ? 'dark' : 'light', revision: 0, backends: { dragon: { state: 'stopped', message: 'Dragon 待连接' }, codex: { state: 'stopped', message: 'Codex 待连接' } }, mcp: [], quota: emptyQuota(), account: '尚未连接', skin: null, petView: 'hidden', animationStartedAt: Date.now(), version: options.version ?? packageInfo.version };
-    this.dragon = new DragonBackend({ home: options.home, workerPath: options.workerPath, settings: () => this.state.settings, key: id => secrets.get(id), definitions: () => [{ name: 'pet_task_scope', description: '查看当前 Agent 的授权范围。', inputSchema: { type: 'object', properties: {} } }, attachmentDefinition, artifactDefinition, ...memoryDefinitions, ...fileDefinitions, ...browserDefinitions, { name: 'pet_terminal', description: '执行 PowerShell 命令，审批方式由当前会话权限等级决定。', inputSchema: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'], additionalProperties: false } }], tool: (agent, name, args, signal) => this.tool(agent, name, args, signal), state: value => { this.view.backends.dragon = value; this.changed(false); }, mcp: value => { this.view.mcp = [...this.view.mcp.filter(v => v.id !== value.id), value]; this.changed(false); }, agent: (id, task) => { const session = this.session(id); session.tasks ??= []; const old = session.tasks.find(t => t.id === task.id); if (old) Object.assign(old, task); else session.tasks.push(task); this.changed(); } });
+    this.dragon = new DragonBackend({ home: options.home, workerPath: options.workerPath, settings: () => this.state.settings, key: id => secrets.get(id), definitions: () => [{ name: 'pet_task_scope', description: '查看当前 Agent 的授权范围。', inputSchema: { type: 'object', properties: {} } }, attachmentDefinition, artifactDefinition, ...memoryDefinitions, ...illustrationDefinitions, ...fileDefinitions, ...browserDefinitions, { name: 'pet_terminal', description: '执行 PowerShell 命令，审批方式由当前会话权限等级决定。', inputSchema: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'], additionalProperties: false } }], tool: (agent, name, args, signal) => this.tool(agent, name, args, signal), state: value => { this.view.backends.dragon = value; this.changed(false); }, mcp: value => { this.view.mcp = [...this.view.mcp.filter(v => v.id !== value.id), value]; this.changed(false); }, agent: (id, task) => { const session = this.session(id); session.tasks ??= []; const old = session.tasks.find(t => t.id === task.id); if (old) Object.assign(old, task); else session.tasks.push(task); this.changed(); } });
     this.codex = new CodexBackend({ preferences: () => this.state.settings.assistant, home: path.join(options.home, 'codex-runtime'), executable: () => this.state.settings.codexPath, tools: this.dragon, state: value => { this.view.backends.codex = value; this.changed(false); }, account: value => { this.view.account = value; this.changed(false); }, quota: value => { this.view.quota = value; this.changed(false); }, open: options.open });
     this.coordinator=new Coordinator({codex:this.codex,dragon:this.dragon,settings:()=>this.state.settings,key:id=>this.secrets.get(id),changed:()=>this.changed()});
   }
-  snapshot(): Snapshot { return structuredClone({ ...this.state, ...this.view }); }
+  snapshot(): Snapshot { return structuredClone({ ...this.state, ...this.view, sessions:this.state.sessions.map(s=>({...s,queuedMessages:(this.state.petChat?.queue??[]).filter(q=>q.sessionId===s.id).map(q=>({...q,paused:!this.petQueueArmed.has(q.commandId)}))})) }); }
   changed(persist = true) { if (persist) this.store.save(this.state); this.view.revision++; this.emit('change'); }
   session(id: string) { const value = this.state.sessions.find(s => s.id === id); if (!value) throw new Error('会话不存在。'); return value; }
   idleSettings() { if (this.state.sessions.some(isBusy)) throw new Error('请先停止正在执行的任务，再修改连接设置。'); }
@@ -115,7 +117,8 @@ export class Runtime extends EventEmitter {
       case 'pet.chat.send': {
         if(this.routing.has(action.commandId))return this.routing.get(action.commandId);
         const job=this.routePetMessage(action.text,action.commandId);this.routing.set(action.commandId,job);
-        try{return await job;}finally{this.routing.delete(action.commandId);}
+        try{await job;}finally{this.routing.delete(action.commandId);}
+        return true;
       }
       case 'session.collaboration': {
         const s=this.session(action.id);if(isBusy(s)||s.readOnly||s.backend!=='dragon')throw Error('请在 Dragon 聊天空闲时修改协作模式。');
@@ -165,8 +168,18 @@ export class Runtime extends EventEmitter {
         if (!profile) throw new Error('模型配置不存在，请重新选择。');
         if(s.collaboration?.enabled&&!/deepseek/i.test(profile.model))s.collaboration={...s.collaboration,enabled:false};
         s.profileId = profile.id; s.updatedAt = Date.now();
-        if (s.usage) s.usage = { ...s.usage, window: contextPolicy(profile).window, estimated: true };
+        if (s.usage) s.usage = { ...s.usage, window: contextPolicy(profile).window, context:undefined, composition:undefined, calibrated:false, estimated: true };
         this.state.settings.selectedProfile = profile.id; this.state.settings.selectedBackend = 'dragon';
+        this.changed(); return true;
+      }
+      case 'session.reasoning': {
+        const s = this.session(action.id);
+        if (s.backend !== 'dragon') throw new Error('Codex 的推理强度请在 Codex 模型设置里选择。');
+        if (isBusy(s) || s.readOnly) throw new Error('请在当前任务结束后修改推理强度。');
+        const profile = this.state.settings.profiles.find(p => p.id === s.profileId);
+        if (!profile || !/deepseek/i.test(profile.baseUrl) && !/deepseek/i.test(profile.model)) throw new Error('当前模型不是 DeepSeek，不支持推理强度。');
+        if (action.effort !== undefined && !['none','low','high','max'].includes(action.effort)) throw new Error('推理强度无效。');
+        s.reasoningEffort = action.effort; s.updatedAt = Date.now();
         this.changed(); return true;
       }
       case 'session.permissionMode': {
@@ -178,7 +191,7 @@ export class Runtime extends EventEmitter {
       }
       case 'session.attachDrop': return this.attachDrop(action.id, action.files);
       case 'session.attachChat': return this.attachChat(action.id, action.sourceId);
-      case 'session.removeAttachment': { const s=this.session(action.id); if(isBusy(s)||s.readOnly||this.attaching.has(s.id))throw new Error('当前不能修改附件。'); s.draftAttachments=(s.draftAttachments??[]).filter(a=>a.id!==action.attachmentId); this.changed(); return; }
+      case 'session.removeAttachment': { const s=this.session(action.id); if(s.readOnly||this.attaching.has(s.id))throw new Error('当前不能修改附件。'); s.draftAttachments=(s.draftAttachments??[]).filter(a=>a.id!==action.attachmentId); this.changed(); return; }
       case 'session.create': return this.create(action.backend, action.profileId, action.workspace, action.carryFrom, action.backend === 'codex' && action.model ? await this.codexChoice(action.model, action.reasoningEffort) : undefined);
       case 'session.select': this.session(action.id); this.state.selectedSessionId = action.id; break;
       case 'session.archive': { const s = this.session(action.id); if (isBusy(s)) throw new Error('请先停止此任务。'); s.archived = true; if (this.state.selectedSessionId === s.id) this.state.selectedSessionId = null; break; }
@@ -187,6 +200,7 @@ export class Runtime extends EventEmitter {
         if (!s) return true; // Repeated requests from another window are harmless.
         if (isBusy(s) || this.runs.has(s.id) || this.attaching.has(s.id)) throw new Error('请先停止任务，并等待附件处理完成后删除。');
         this.state.sessions = this.state.sessions.filter(v => v.id !== s.id);
+        if(this.state.petChat){for(const q of this.state.petChat.queue??[])if(q.sessionId===s.id)this.petQueueArmed.delete(q.commandId);this.state.petChat.queue=this.state.petChat.queue?.filter(q=>q.sessionId!==s.id);if(this.state.petChat.sessionId===s.id)this.state.petChat.sessionId=undefined;}
         if (this.state.selectedSessionId === s.id) this.state.selectedSessionId = this.state.sessions.find(v => !v.archived)?.id ?? null;
         this.state.pendingSessionDeletes = [...(this.state.pendingSessionDeletes ?? []), s.id];
         this.changed(); // Persist deletion before cleanup, so a crash cannot restore the conversation.
@@ -199,7 +213,10 @@ export class Runtime extends EventEmitter {
         this.state.settings.pet.chatMode = action.mode; break;
       }
       case 'session.draft': this.session(action.id).draft = action.text.slice(0, 200000); break;
-      case 'session.send': this.send(action.id, action.text, action.commandId); return;
+      case 'session.send': {const s=this.session(action.id);if(this.state.sessions.some(s=>s.messages.some(m=>m.commandId===action.commandId))||this.state.petChat?.queue?.some(q=>q.commandId===action.commandId))return true;
+        if(isBusy(s)||this.state.petChat?.queue?.some(q=>q.sessionId===s.id)){this.enqueue(s.id,action.text,action.commandId,s.draftAttachments??[]);s.draft='';s.draftAttachments=[];this.changed();if(!isBusy(s))this.drainQueue(s.id);}else this.send(s.id,action.text,action.commandId);return true;}
+      case 'session.cancelQueued': {this.session(action.id);if(this.state.petChat)this.state.petChat.queue=this.state.petChat.queue?.filter(q=>q.sessionId!==action.id||q.commandId!==action.commandId);this.petQueueArmed.delete(action.commandId);this.changed();if(!isBusy(this.session(action.id)))this.drainQueue(action.id);return true;}
+      case 'session.resumeQueued': {const s=this.session(action.id);if(isBusy(s)||s.readOnly)throw Error('请在聊天空闲时继续发送');for(const q of this.state.petChat?.queue??[])if(q.sessionId===s.id)this.petQueueArmed.add(q.commandId);this.drainQueue(s.id);return true;}
       case 'session.stop': await this.stop(action.id); return;
       case 'agent.stop': await this.dragon.cancel(this.session(action.id), action.agentId); return;
       case 'session.compact': { const s = this.session(action.id); if (s.backend === 'codex') throw new Error('Codex 由自己的上下文策略管理；可创建新会话并携带摘要。'); this.send(s.id, '/compact', randomUUID()); return; }
@@ -209,8 +226,9 @@ export class Runtime extends EventEmitter {
         this.idleSettings(); const p = action.profile; contextPolicy(p); const url = new URL(p.baseUrl);
         if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('API 地址不能包含密钥、参数或账号密码。');
         if (!p.model.trim() || !p.name.trim() || !/^[a-zA-Z0-9_-]{1,64}$/.test(p.id)) throw new Error('请完整填写模型名称和配置名称。');
+        if(p.pricing&&(!/^[A-Z]{3}$/.test(p.pricing.currency)||!Number.isFinite(p.pricing.input)||p.pricing.input<0||!Number.isFinite(p.pricing.output)||p.pricing.output<0||p.pricing.cacheRead!==undefined&&(!Number.isFinite(p.pricing.cacheRead)||p.pricing.cacheRead<0)))throw Error('自定义单价无效');
         await this.secrets.set(`profile:${p.id}`, action.apiKey ?? '');
-        const safe = { id: p.id, name: p.name, provider: p.provider, protocol: p.protocol, baseUrl: p.baseUrl, model: p.model, contextWindow: p.contextWindow, maxOutput: p.maxOutput, hasKey: Boolean(await this.secrets.get(`profile:${p.id}`)), deepseekSearch: p.deepseekSearch };
+        const safe = { pricing:p.pricing, id: p.id, name: p.name, provider: p.provider, protocol: p.protocol, baseUrl: p.baseUrl, model: p.model, contextWindow: p.contextWindow, maxOutput: p.maxOutput, hasKey: Boolean(await this.secrets.get(`profile:${p.id}`)), deepseekSearch: p.deepseekSearch };
         this.state.settings.profiles = [...this.state.settings.profiles.filter(v => v.id !== p.id), safe]; this.state.settings.selectedProfile = p.id; await this.dragon.dispose(); break;
       }
       case 'profile.delete': this.idleSettings(); this.state.settings.profiles = this.state.settings.profiles.filter(p => p.id !== action.id); this.secrets.remove(`profile:${action.id}`); if (this.state.settings.selectedProfile === action.id) this.state.settings.selectedProfile = this.state.settings.profiles[0]?.id ?? ''; await this.dragon.dispose(); break;
@@ -287,14 +305,14 @@ export class Runtime extends EventEmitter {
     return { model: selected.model, effort: value };
   }
   async attachFiles(id: string, files: string[]) {
-    const s=this.session(id); if(isBusy(s)||s.readOnly||this.attaching.has(id))throw new Error('当前不能添加附件。');
+    const s=this.session(id); if(s.readOnly||this.attaching.has(id))throw new Error('当前不能添加附件。');
     if(!files.length)return; if((s.draftAttachments?.length??0)+files.length>10)throw new Error('每条消息最多添加 10 份附件或聊天引用。');
     this.attaching.add(id);
     try { const added=[]; for(const file of files)added.push(await this.attachments.importFile(id,file)); s.draftAttachments=[...(s.draftAttachments??[]),...added]; this.changed(); }
     finally {this.attaching.delete(id);}
   }
   async attachDrop(id: string, files: DroppedFile[]) {
-    const s=this.session(id); if(isBusy(s)||s.readOnly||this.attaching.has(id))throw new Error('当前不能添加附件。');
+    const s=this.session(id); if(s.readOnly||this.attaching.has(id))throw new Error('当前不能添加附件。');
     if(!files.length)return; if((s.draftAttachments?.length??0)+files.length>10)throw new Error('每条消息最多添加 10 份附件或聊天引用。');
     this.attaching.add(id);
     try {
@@ -306,7 +324,7 @@ export class Runtime extends EventEmitter {
   private async attachChat(id: string, sourceId: string) {
     const s=this.session(id), source=this.session(sourceId);
     if(id===sourceId)throw new Error('不能把当前聊天关联到自身。');
-    if(isBusy(s)||s.readOnly||this.attaching.has(id))throw new Error('当前不能添加聊天引用。');
+    if(s.readOnly||this.attaching.has(id))throw new Error('当前不能添加聊天引用。');
     if((s.draftAttachments?.length??0)>=10)throw new Error('每条消息最多添加 10 份资料。');
     this.attaching.add(id);
     try{s.draftAttachments=[...(s.draftAttachments??[]),await this.attachments.importChat(id,source)];this.changed();}finally{this.attaching.delete(id);}
@@ -323,9 +341,21 @@ export class Runtime extends EventEmitter {
     if(!id)id=this.create(this.state.settings.selectedBackend??'dragon',undefined,'',undefined,undefined,false);
     const attached=await this.attachments.copyTo('pet-inbox',id,inbox);
     this.state.petChat={...this.state.petChat,sessionId:id,notice:match.notice};
-    if(isBusy(this.session(id))){this.state.petChat.queue??=[];this.state.petChat.queue.push({sessionId:id,text,commandId,attachments:attached});this.petQueueArmed.add(commandId);}
+    if(isBusy(this.session(id))||this.state.petChat.queue?.some(q=>q.sessionId===id)){this.enqueue(id,text,commandId,attached);if(!isBusy(this.session(id)))this.drainQueue(id);}
     else this.send(id,text,commandId,true,attached);
     if(this.state.petChat.draft===text)this.state.petChat.draft='';this.state.petChat.attachments=this.state.petChat.attachments?.filter(a=>!inbox.some(v=>v.id===a.id));this.changed();return id;
+  }
+  private enqueue(id:string,text:string,commandId:string,attachments:ChatAttachment[]){
+    const s=this.session(id);if(s.readOnly||this.attaching.has(id))throw Error('聊天只读或附件仍在导入');
+    if((!text.trim()&&!attachments.length)||text.length>200000||!commandId||commandId.length>200)throw Error('消息或请求编号无效');
+    const chat=this.state.petChat??={};chat.queue??=[];if(chat.queue.some(q=>q.commandId===commandId))return;
+    chat.queue.push({sessionId:id,text,commandId,attachments:structuredClone(attachments)});this.petQueueArmed.add(commandId);this.changed();
+  }
+  private drainQueue(id:string){
+    const s=this.session(id);if(isBusy(s))return;const q=this.state.petChat?.queue?.find(q=>q.sessionId===id);if(!q||!this.petQueueArmed.has(q.commandId))return;
+    try {this.send(id,q.text,q.commandId,true,q.attachments);this.state.petChat!.queue=this.state.petChat!.queue!.filter(v=>v!==q);this.petQueueArmed.delete(q.commandId);}
+    catch(error){for(const item of this.state.petChat?.queue??[])if(item.sessionId===id)this.petQueueArmed.delete(item.commandId);s.error='待发送消息已暂停：'+(error as Error).message;}
+    this.changed();
   }
   send(id: string, text: string, commandId: string, independent=false,independentAttachments:ChatAttachment[]=[]) {
     if (this.configuring) throw new Error('正在保存连接设置，请稍后发送。');
@@ -352,10 +382,12 @@ export class Runtime extends EventEmitter {
         if(req.kind==='approval' && (s.permissionMode??'ask')!=='ask') { if(operation){operation.status='running';operation.startedAt=Date.now();} this.changed(); return resolve(true); }
         if(operation)operation.status='approval';
         const key = `${s.id}:${req.id}`;
-        const finish = (value: unknown) => { if(operation){operation.status=controller.signal.aborted?'cancelled':value===true?'running':'declined';if(value===true)operation.startedAt=Date.now();else operation.completedAt=Date.now();} this.answers.delete(key); signal.removeEventListener('abort', abort); s.pending = s.pending.filter(r => r.id !== req.id); if (!controller.signal.aborted) s.status = s.pending.length ? 'waiting' : 'running'; this.changed(); resolve(value); };
+        let settled=false;
+        const finish = (value: unknown) => { if(settled)return;settled=true;if(operation){operation.status=controller.signal.aborted?'cancelled':value===true?'running':'declined';if(value===true)operation.startedAt=Date.now();else operation.completedAt=Date.now();} this.answers.delete(key); signal.removeEventListener('abort', abort); s.pending = s.pending.filter(r => r.id !== req.id); if (!controller.signal.aborted) s.status = s.pending.length ? 'waiting' : 'running'; this.changed(); resolve(value); };
         const abort = () => finish(false); this.answers.set(key, finish); signal.addEventListener('abort', abort, { once: true });
-        s.pending.push({ ...req, sessionId: s.id, runId }); s.status = 'waiting'; this.changed();
+        s.pending.push({ ...req, operation:operation?{name:operation.name,arguments:operation.arguments}:req.operation, sessionId: s.id, runId }); s.status = 'waiting'; this.changed();
       }),
+      attempt: (attempt,agentId) => {if(live()){s.attempts??=[];const index=s.attempts.findIndex(a=>a.id===attempt.id);const value={...attempt,agentId,runId};if(index<0)s.attempts.push(value);else s.attempts[index]=value;this.changed();}},
       usage: usage => { if (live()) { s.usage = usage; this.changed(); } },
       notice: value => { if (live()) { s.messages.push({ id: randomUUID(), role: 'notice', text: value, createdAt: Date.now(), runId, sequence:++sequence }); this.changed(); } },
       nativeTurnId: value => { if(s.runId===runId){s.nativeTurnId=value;this.changed();} },
@@ -373,8 +405,7 @@ export class Runtime extends EventEmitter {
       for (const tool of s.tools) if (tool.runId === runId && ['running','queued','approval'].includes(tool.status)) tool.status = s.status === 'cancelled' ? 'cancelled' : 'unknown';
       s.pending = []; this.runs.delete(s.id); s.updatedAt = Date.now(); this.changed(); await host.dispose();
       for (const [key, scope] of this.scopes) if (key.startsWith(s.id + ':')) { this.scopes.delete(key); await scope.host.dispose(); }
-      const queued=this.state.petChat?.queue?.find(q=>q.sessionId===s.id&&this.petQueueArmed.has(q.commandId));
-      if(queued){this.petQueueArmed.delete(queued.commandId);if(s.status==='completed'){this.state.petChat!.queue=this.state.petChat!.queue!.filter(q=>q!==queued);try{this.send(s.id,queued.text,queued.commandId,true,queued.attachments);}catch(e){this.state.petChat!.draft=queued.text;this.state.petChat!.notice=(e as Error).message;}}else this.state.petChat!.notice='上一任务未正常完成，待发送消息已保留，请核对后重新发送。';this.changed();}
+      if(s.status==='completed')this.drainQueue(s.id);else {for(const q of this.state.petChat?.queue??[])if(q.sessionId===s.id)this.petQueueArmed.delete(q.commandId);this.changed();}
     });
   }
   private async browserConfig(sessionId: string) {
@@ -398,7 +429,13 @@ export class Runtime extends EventEmitter {
       if(!Array.isArray(args?.paths)||!args.paths.length||args.paths.length>32)throw Error('请提供 1–32 个文件路径。');
       if(!await this.dragon.approveTool(agent,'登记文件产物',args.paths.join('\n')))throw Error('用户拒绝了登记。');
       const files=await this.artifacts.register(this.session(id),args.paths,agent.grant.folders,agent.grant.allFolders);this.changed();
-      return {success:true,contentItems:[{type:'inputText',text:JSON.stringify(files)}]};
+      return {success:true,facts:{artifacts:files.map(f=>({path:f.path,size:f.size,modifiedAt:f.modifiedAt}))},contentItems:[{type:'inputText',text:JSON.stringify(files)}]};
+    }
+    if(name==='pet_illustration_list'||name==='pet_illustration_create'){
+      if(!this.illustration)throw Error('插画功能尚未就绪');
+      if(!await this.dragon.approveTool(agent,name==='pet_illustration_create'?'创建插画项目':'查看插画项目',name==='pet_illustration_create'?String(args.description):'读取项目名称与状态'))return {success:false,contentItems:[{type:'inputText',text:'用户拒绝了插画操作'}]};
+      const result=name==='pet_illustration_list'?this.illustration.list():await this.illustration.create(String(args.description),'agent:'+agent.runId+':'+createHash('sha256').update(String(args.description)).digest('hex'));
+      return {success:true,contentItems:[{type:'inputText',text:JSON.stringify(result)}]};
     }
     if(name==='pet_attachment_read')return this.attachments.read(this.session(id),args);
     if (name !== 'pet_terminal') {
@@ -411,7 +448,7 @@ export class Runtime extends EventEmitter {
       }
       scope.signal = signal; const result=await scope.host.call(name, args);
       if(result.success&&['pet_files_write','pet_files_copy','pet_files_move'].includes(name)) {
-        try {await this.artifacts.register(this.session(id),[args.destination??args.path],agent.grant.folders,agent.grant.allFolders);this.changed();}
+        try {const files=await this.artifacts.register(this.session(id),[args.destination??args.path],agent.grant.folders,agent.grant.allFolders);result.facts={artifacts:files.map(f=>({path:f.path,size:f.size,modifiedAt:f.modifiedAt}))};this.changed();}
         catch(e){run.hooks.notice('文件操作已成功，但产物未登记：'+(e as Error).message);}
       }
       return result;
@@ -421,7 +458,7 @@ export class Runtime extends EventEmitter {
     const command = args?.command; if (typeof command !== 'string' || !command.trim() || command.length > 32000) throw new Error('命令参数无效。');
     const cwd = agent.grant.folders[0];
     const approved = await this.dragon.approveTool(agent, '执行 PowerShell 命令', `目录：${cwd}\n\n${command}\n\n此命令按当前 Windows 账号的权限运行。`);
-    if (approved !== true || signal.aborted) throw new Error('命令未获批准。');
+    if (approved !== true || signal.aborted) return {success:false,errorKind:signal.aborted?'cancelled':'denied',contentItems:[{type:'inputText',text:'命令未获批准，未执行。'}]};
     const operation=[...s.tools].reverse().find(t=>t.agentId===agent.id&&t.name==='pet_terminal'&&t.runId===agent.runId&&t.status==='running');
     const publish=(result:string,exitCode?:number|null)=>{if(operation)run.hooks.tool({id:operation.id,name:operation.name,cwd,result,exitCode,status:'running',startedAt:operation.startedAt??Date.now()});};
     return new Promise(resolve => {
@@ -430,7 +467,7 @@ export class Runtime extends EventEmitter {
       const abort = () => { if (child.pid) spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); };
       const timer = setTimeout(()=>{timedOut=true;abort();}, 120000); signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort();
       child.on('error', e => { clearTimeout(timer); signal.removeEventListener('abort', abort); resolve({ success: false, contentItems: [{ type: 'inputText', text: e.message }] }); });
-      child.on('close', code => { clearTimeout(timer); signal.removeEventListener('abort', abort);publish(output,code); resolve({ success: code === 0 && !signal.aborted&&!timedOut, contentItems: [{ type: 'inputText', text: `${timedOut?'命令超过 120 秒，已停止。\n':''}退出码：${code}\n${output}` }] }); });
+      child.on('close', code => { clearTimeout(timer); signal.removeEventListener('abort', abort);publish(output,code); resolve({ errorKind:timedOut||signal.aborted?'unknown':code===0?undefined:'service', facts:!signal.aborted&&!timedOut&&code!==null?{exitCode:code}:undefined, success: code === 0 && !signal.aborted&&!timedOut, contentItems: [{ type: 'inputText', text: `${timedOut?'命令超过 120 秒，已停止。\n':''}退出码：${code}\n${output}` }] }); });
     });
   }
   async stop(id: string) { const s = this.session(id), run = this.runs.get(id); if (!run) return; s.status = 'stopping'; run.controller.abort(); this.changed(); await (s.backend === 'dragon' ? this.dragon : this.codex).cancel(s); }

@@ -33,7 +33,7 @@ for (const protocol of ['openai-completions', 'openai-responses', 'anthropic-mes
       : protocol === 'openai-responses' ? [{ type: 'response.output_text.delta', delta: 'text' }, ...[0, 1].flatMap(index => [{ type: 'response.output_item.added', output_index: index, item: { type: 'function_call', call_id: `c${index}`, name: `t${index}`, arguments: '' } }, { type: 'response.function_call_arguments.delta', output_index: index, delta: '{"x":' }, { type: 'response.function_call_arguments.delta', output_index: index, delta: '1}' }]), { type: 'response.completed', response: { usage: { input_tokens: 10, output_tokens: 5 } } }]
       : [{ type: 'message_start', message: { usage: { input_tokens: 10 } } }, { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }, { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'text' } }, ...[1, 2].flatMap(index => [{ type: 'content_block_start', index, content_block: { type: 'tool_use', id: `c${index}`, name: `t${index}`, input: {} } }, { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: '{"x":' } }, { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: '1}' } }, { type: 'content_block_stop', index }]), { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } }, { type: 'message_stop' }];
     const req = request(protocol), text: string[] = []; req.onText = t => text.push(t);
-    const r = await new HttpModelAdapter(async () => stream(events)).generate(req); assert.equal(text.join(''), 'text'); assert.equal(r.message.calls!.length, 2); assert(r.message.calls!.every(c => c.arguments === '{"x":1}')); assert.deepEqual(r.usage, { input: 10, output: 5 });
+    const r = await new HttpModelAdapter(async () => stream(events)).generate(req); assert.equal(text.join(''), 'text'); assert.equal(r.message.calls!.length, 2); assert(r.message.calls!.every(c => c.arguments === '{"x":1}')); assert.equal(r.usage.input, 10); assert.equal(r.usage.output, 5); assert.equal(r.usage.reported, true);
     await assert.rejects(new HttpModelAdapter(async () => new Response('', { status: 500 })).generate(request(protocol)), /HTTP 500/);
     await assert.rejects(new HttpModelAdapter(async () => stream([{ type: 'error', error: { message: 'fixture' } }])).generate(request(protocol)), /失败/);
     const abort = new AbortController(), pending = new HttpModelAdapter(async () => new Response(new ReadableStream({ start() {} }))).generate({ ...req, signal: abort.signal }); setTimeout(() => abort.abort(), 10); await assert.rejects(pending);
@@ -41,3 +41,21 @@ for (const protocol of ['openai-completions', 'openai-responses', 'anthropic-mes
     assert(JSON.stringify(serialize(imageReq).body).includes('AA=='));
   });
 }
+test('DeepSeek 思考模式参数：官方档位只发给 DeepSeek 端点', () => {
+  const deep = request('openai-completions');
+  deep.profile.baseUrl = 'https://api.deepseek.com'; deep.profile.model = 'deepseek-flash';
+  deep.reasoningEffort = 'max';
+  assert.equal((serialize(deep).body as any).reasoning_effort, 'max');
+  assert.deepEqual((serialize(deep).body as any).thinking, { type: 'enabled' });
+  deep.reasoningEffort = 'low';
+  assert.equal((serialize(deep).body as any).reasoning_effort, 'low');
+  deep.reasoningEffort = 'none';
+  assert.equal((serialize(deep).body as any).reasoning_effort, undefined);
+  assert.deepEqual((serialize(deep).body as any).thinking, { type: 'disabled' });
+  const byModel = request('openai-completions');
+  byModel.profile.model = 'deepseek-v4-pro'; byModel.reasoningEffort = 'high';
+  assert.equal((serialize(byModel).body as any).reasoning_effort, 'high');
+  const other = request('openai-completions'); other.reasoningEffort = 'max';
+  assert.equal((serialize(other).body as any).reasoning_effort, undefined);
+  assert.equal((serialize(other).body as any).thinking, undefined);
+});

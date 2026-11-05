@@ -36,6 +36,7 @@ if (process.env.DRAGON_EXE) {
   for (const key of Object.keys(environment)) if (key.toLowerCase() === 'path') delete environment[key];
   environment.Path = [process.env.SystemRoot, path.join(process.env.SystemRoot, 'System32'), path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0')].join(';');
 }
+delete environment.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({ executablePath, args: process.env.DRAGON_EXE ? [] : ['.'], cwd: process.cwd(), env: environment, timeout: 45000 });
 const errors = [];
 app.process().stderr.on('data', data => { const text = data.toString(); if (!/DevTools listening|Debugger attached|sqlite|ExperimentalWarning|GPU|cache/.test(text)) console.log(text); });
@@ -56,8 +57,8 @@ try {
   await pet.screenshot({ path: 'test-results/pet.png' });
   await pet.getByRole('button', { name: '输入消息', exact: true }).click();
   const bubble = windows.find(w => w.url().includes('view=bubble'));
-  await bubble.getByRole('button', { name: '切换到详细版' }).click();
-  await bubble.getByRole('button', { name: '新的对话', exact: true }).waitFor();
+  await bubble.getByRole('button', { name: '详细', exact:true }).click();
+  await bubble.getByRole('combobox', {name:'龙娘当前聊天'}).waitFor();
   await bubble.screenshot({ path: 'test-results/bubble.png' });
   const expectedVersion = JSON.parse(await readFile('package.json', 'utf8')).version;
   assert.equal((await page.evaluate(() => window.dragon.snapshot())).version, expectedVersion);
@@ -108,32 +109,35 @@ try {
   await page.getByText('fixture · 512K 上下文', { exact: false }).waitFor();
   await page.screenshot({ path: 'test-results/settings.png' });
   await page.getByRole('button', { name: '新的对话', exact: false }).click();
-  await page.getByRole('textbox', { name: '发送给龙娘的消息' }).fill('在两个窗口共享这份草稿');
+  await page.getByRole('textbox', { name: '发送给龙娘的消息' }).fill('工作台独立草稿');
+  await page.evaluate(async()=>{const state=await window.dragon.snapshot();await window.dragon.action({type:'pet.chat.bind',id:state.selectedSessionId,pinned:true});await window.dragon.action({type:'pet.chat.draft',text:'龙娘独立草稿'});});
   await bubble.getByRole('textbox', { name: '发送给龙娘的消息' }).waitFor();
   await page.waitForTimeout(300);
-  assert.equal(await bubble.getByRole('textbox', { name: '发送给龙娘的消息' }).inputValue(), '在两个窗口共享这份草稿');
+  assert.equal(await bubble.getByRole('textbox', { name: '发送给龙娘的消息' }).inputValue(), '龙娘独立草稿');
+  assert.equal(await page.getByRole('textbox',{name:'发送给龙娘的消息'}).inputValue(),'工作台独立草稿');
   await app.evaluate(({ dialog }, directory) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [directory] }); }, dataDir);
   await page.getByRole('button', { name: '选择工作文件夹', exact: false }).click();
   await page.getByRole('textbox', { name: '发送给龙娘的消息' }).fill('保存测试文件');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
-  await bubble.getByRole('button', { name: '允许本次操作', exact: true }).waitFor({ timeout: 60000 });
+  await bubble.getByRole('button', { name: '批准本次操作', exact: true }).waitFor({ timeout: 60000 });
   await page.evaluate(() => window.dragon.action({ type: 'pet.chatMode', mode: 'simple' }));
   await bubble.getByRole('button', { name: '1 项待确认', exact: true }).click();
-  await bubble.getByRole('button', { name: '允许本次操作', exact: true }).waitFor();
+  await bubble.getByRole('button', { name: '批准本次操作', exact: true }).waitFor();
   await page.screenshot({ path: 'test-results/approval.png' });
-  await bubble.getByRole('button', { name: '允许本次操作', exact: true }).click();
+  await bubble.getByRole('button', { name: '批准本次操作', exact: true }).click();
   await page.locator('.rich-text').filter({ hasText: /^已写入测试文件。$/ }).waitFor({ timeout: 30000 });
   assert.equal(await readFile(testFile, 'utf8'), 'Approved from the dragon bubble.');
   await page.screenshot({ path: 'test-results/conversation.png' });
   await page.getByRole('button', { name: '新的对话', exact: false }).click();
   await page.getByRole('button', { name: '选择工作文件夹', exact: false }).click();
   const session = await page.evaluate(async () => (await window.dragon.snapshot()).selectedSessionId);
+  await page.evaluate(id=>window.dragon.action({type:'pet.chat.bind',id,pinned:true}),session);
   const command = { type: 'session.send', id: session, text: '协作验收：分派两个子任务。', commandId: 'dual-window-idempotency' };
   await Promise.all([page.evaluate(a => window.dragon.action(a), command), bubble.evaluate(a => window.dragon.action(a), command)]);
   for (let i = 0; i < 2; i++) {
-    await bubble.getByRole('button', { name: '允许本次操作', exact: true }).waitFor({ timeout: 30000 });
-    assert((await bubble.locator('.approval h3').innerText()).includes('子任务'));
-    await bubble.getByRole('button', { name: '允许本次操作', exact: true }).click();
+    await bubble.getByRole('button', { name: '批准本次操作', exact: true }).waitFor({ timeout: 30000 });
+    assert((await bubble.locator('.approval-card h3').innerText()).includes('子任务'));
+    await bubble.getByRole('button', { name: '批准本次操作', exact: true }).click();
   }
   let result;
   for (const deadline = Date.now() + 30000; Date.now() < deadline;) {
@@ -155,7 +159,7 @@ try {
   await page.getByRole('button', { name: '工具连接', exact: false }).click();
   await page.getByRole('heading', { name: '连接更大的世界' }).waitFor();
   await page.screenshot({ path: 'test-results/mcp.png' });
-  assert.deepEqual(errors, []); console.log('UI PASS: workbench, original pet, shared draft, encrypted key form, Dragon tool loop, child task tree, cross-window approval and duplicate sends, persisted approvals, MCP settings; no renderer errors.');
+  assert.deepEqual(errors, []); console.log('UI PASS: workbench, original pet, independent drafts, encrypted key form, Dragon tool loop, child task tree, cross-window approval and duplicate sends, persisted approvals, MCP settings; no renderer errors.');
 } catch (error) {
   for (const [i, page] of app.windows().entries()) { console.log('diagnostic', page.url(), await page.locator('body').innerText().catch(() => 'unavailable')); await page.screenshot({ path: `test-results/failure-${i}.png` }).catch(() => undefined); }
   throw error;

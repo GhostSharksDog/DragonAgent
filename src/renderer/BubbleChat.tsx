@@ -1,17 +1,23 @@
-import React,{useEffect,useState} from 'react';
-import type {Action,Snapshot,AgentSession} from '../shared/contracts';
-import {Icon} from './Icons';
-export function BubbleChat({state,session,status,conversation,act}:{state:Snapshot;session?:AgentSession;status:string;conversation:React.ReactNode;act(a:Action):Promise<unknown>}){
-  const simple=state.settings.pet.chatMode!=='detailed';
-  const [draft,setDraft]=useState(state.petChat?.draft??''),[sending,setSending]=useState(false);
-  useEffect(()=>{setDraft(state.petChat?.draft??'');},[state.petChat?.draft]);
-  const send=async()=>{if(sending||(!draft.trim()&&!state.petChat?.attachments?.length))return;setSending(true);try{await act({type:'pet.chat.send',text:draft,commandId:crypto.randomUUID()});}finally{setSending(false);}};
-  return <><header className="bubble-header"><strong>霜璃{status?' · '+status:''}</strong><div className="bubble-header-actions"><button className="bubble-mode" onClick={()=>void act({type:'pet.chatMode',mode:simple?'detailed':'simple'})}>{simple?'详细':'简约'}</button><button className="bubble-control" title="打开完整工作台" aria-label="打开完整工作台" onClick={async()=>{if(session)await act({type:'session.select',id:session.id});await act({type:'window.workbench',page:'chat'});}}><Icon name="external" size={20}/></button><button className="bubble-close" aria-label="收起气泡" title="收起气泡 · Esc" onClick={()=>void act({type:'pet.view',view:'hidden'})}><Icon name="close" size={20}/></button></div></header>
-    <div className="pet-chat-context"><label>当前聊天<select aria-label="龙娘当前聊天" value={session?.id??''} onChange={e=>void act({type:'pet.chat.bind',id:e.target.value||undefined,pinned:!!e.target.value})}><option value="">自动识别 · 无匹配则新建</option>{state.sessions.filter(s=>!s.readOnly&&!s.archived).map(s=><option value={s.id} key={s.id}>{s.title}</option>)}</select></label><label className="pet-pin"><input type="checkbox" checked={!!state.petChat?.pinned} disabled={!session} onChange={e=>void act({type:'pet.chat.bind',id:session?.id,pinned:e.target.checked})}/>固定</label></div>
-    {!simple&&<><div className="pet-chat-permission">权限：{session?.permissionMode==='full'?'完全放开':session?.permissionMode==='auto'?'帮我批准':'全请求批准'} · {state.petChat?.pinned?'固定聊天':'按消息自动选择'}</div>{conversation}</>}
-    {state.petChat?.notice&&<p className="pet-route-notice" role="status">{state.petChat.notice}</p>}
-    {state.petChat?.queue?.map(q=><div className="pet-queued" key={q.commandId}><span>等待发送到 {state.sessions.find(s=>s.id===q.sessionId)?.title??'原聊天'}</span><button onClick={()=>void act({type:'pet.chat.cancelQueued',commandId:q.commandId})}>取消</button></div>)}
-    {simple&&!!session?.pending.length&&<button className="bubble-attention" onClick={()=>void act({type:'pet.chatMode',mode:'detailed'})}>{session.pending.length} 项待确认</button>}
-    <div className="pet-attachment-list">{state.petChat?.attachments?.map(a=><span className="attachment-chip" key={a.id}>{a.name}<button aria-label={'移除 '+a.name} onClick={()=>void act({type:'pet.chat.removeAttachment',id:a.id})}>×</button></span>)}</div><form className="composer pet-route-composer" onSubmit={e=>{e.preventDefault();void send();}}><button type="button" className="plain" aria-label="添加参考文件" onClick={()=>void act({type:'pet.chat.pickFiles'})}><Icon name="plus" size={20}/></button><textarea aria-label="发送给龙娘的消息" placeholder="说说正在做的项目，我会接上话…" value={draft} rows={2} onChange={e=>{setDraft(e.target.value);void act({type:'pet.chat.draft',text:e.target.value});}} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&e.keyCode!==229){e.preventDefault();void send();}}}/><button className="send" aria-label="发送消息" disabled={sending||(!draft.trim()&&!state.petChat?.attachments?.length)} title="Enter 发送，Shift+Enter 换行"><Icon name="arrow" size={20}/></button></form>
-  </>;
+import {useEffect,useRef,useState} from 'react';
+import type {Action,Snapshot} from '../shared/contracts';
+/** 单击桌宠只弹一个输入框：Enter 发送，Shift+Enter 换行。 */
+export function BubbleChat({state,act}:{state:Snapshot;act(a:Action):Promise<unknown>}){
+  const [draft,setDraft]=useState(state.petChat?.draft??'');
+  const composing=useRef(false),focused=useRef(false),sending=useRef(false),box=useRef<HTMLTextAreaElement>(null);
+  // 组合输入和聚焦时不回灌草稿，避免拼音被 IPC 往返的旧值截断。
+  useEffect(()=>{if(composing.current||focused.current)return;setDraft(state.petChat?.draft??'');},[state.petChat?.draft]);
+  useEffect(()=>{box.current?.focus();},[]);
+  const send=async()=>{
+    if(sending.current||!draft.trim())return;sending.current=true;
+    try{if(await act({type:'pet.chat.send',text:draft,commandId:crypto.randomUUID()})===true){setDraft('');composing.current=false;focused.current=false;void act({type:'pet.view',view:'hidden'});}}
+    finally{sending.current=false;}
+  };
+  return <div className="pet-quick">
+    <textarea ref={box} aria-label="发送给龙娘的消息" placeholder="说点什么…" value={draft} rows={2}
+      onFocus={()=>{focused.current=true;}} onBlur={()=>{focused.current=false;}}
+      onCompositionStart={()=>{composing.current=true;}}
+      onCompositionEnd={e=>{composing.current=false;setDraft(e.currentTarget.value);void act({type:'pet.chat.draft',text:e.currentTarget.value});}}
+      onChange={e=>{setDraft(e.target.value);if(!composing.current&&!(e.nativeEvent as InputEvent).isComposing)void act({type:'pet.chat.draft',text:e.target.value});}}
+      onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&e.keyCode!==229){e.preventDefault();void send();}}}/>
+  </div>;
 }

@@ -1,0 +1,21 @@
+/* Outer app chrome and navigation surround one rounded, independently scrolling workspace. */
+:root[data-theme=light]{--shell-bg:#f6f7f9;--workspace-edge:#e8eaf0}
+:root[data-theme=dark]{--shell-bg:#1e1b25;--workspace-edge:#3b3448}
+.app-shell{display:grid;grid-template-columns:254px minmax(0,1fr);grid-template-rows:36px minmax(0,1fr);gap:0;box-sizing:border-box;padding:0 10px 10px 0;background:var(--shell-bg);height:100dvh}
+.app-shell.left-collapsed{grid-template-columns:64px minmax(0,1fr)}
+.app-chrome{grid-column:1 / -1;grid-row:1;display:flex;align-items:center;gap:10px;min-width:0;padding:0 150px 0 13px;color:var(--muted);font-size:12px;-webkit-app-region:drag;app-region:drag;user-select:none}
+.app-chrome button{-webkit-app-region:no-drag;app-region:no-drag;width:28px;height:28px;padding:0;font-size:17px;display:grid;place-items:center;border-radius:7px}
+.app-chrome button:hover{background:var(--soft)}.chrome-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}
+.app-shell>.sidebar{grid-column:1;grid-row:2;min-width:0;width:auto;border:0;background:transparent;padding:9px 14px 12px;overflow:auto}
+.app-shell .brand{padding:10px 7px 22px}.app-shell .brand-avatar{width:46px;height:46px}.app-shell .brand>div{font-size:18px}.app-shell .new-chat{background:var(--bg);border:1px solid var(--line);border-radius:10px;min-height:38px}
+.app-shell .nav-label{margin-top:22px}.app-shell .sidebar nav button{font-size:13px;border-radius:9px;min-height:40px}.app-shell .sidebar-bottom{padding-top:10px}
+.app-shell.left-collapsed>.sidebar{padding-left:8px;padding-right:8px}.app-shell.left-collapsed .brand{padding:6px 0 20px}.app-shell.left-collapsed .brand-avatar{width:42px;height:42px}
+.app-shell>.main-area{grid-column:2;grid-row:2;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;background:var(--bg);border:1px solid var(--workspace-edge);border-radius:18px;box-shadow:0 2px 8px #18203303}
+.main-area>.topbar{grid-column:auto;grid-row:auto;min-height:52px;height:52px;padding:0 22px;gap:12px;background:var(--bg);border-bottom:1px solid var(--workspace-edge);-webkit-app-region:no-drag;app-region:no-drag}
+.topbar>div{flex:1;min-width:0}.topbar strong{font-size:14px;font-weight:550}.topbar>button.sidebar-toggle{margin-left:0}
+.main-area>.workspace,.main-area>.welcome,.main-area>.settings-page,.main-area>.illustration-page{grid-column:auto;grid-row:auto;flex:1;min-width:0;min-height:0}
+.main-area>.settings-page{padding:28px clamp(18px,5%,60px)}
+.main-area>.workspace>.inspector{background:var(--bg);border-left:1px solid var(--workspace-edge)}
+.session-bar{padding-top:12px;padding-bottom:12px}
+@media(max-width:1100px){.app-shell{grid-template-columns:220px minmax(0,1fr)}.app-shell.left-collapsed{grid-template-columns:64px minmax(0,1fr)}}
+@media(max-width:700px){.app-shell{grid-template-columns:64px minmax(0,1fr);padding-right:6px;padding-bottom:6px}.app-shell>.sidebar{padding-left:8px;padding-right:8px}.app-shell .sidebar .brand>div,.app-shell .sidebar .nav-label,.app-shell .sidebar .history,.app-shell .sidebar .runtime-state,.app-shell .sidebar .nav-count{display:none}.app-shell .sidebar button{font-size:0;gap:0;padding:10px;justify-content:center}.app-shell .sidebar button svg{flex:none}.app-shell .sidebar .new-chat>span{display:none}.app-shell .brand{padding:6px 0 20px;justify-content:center}.app-shell>.main-area{border-radius:14px}.main-area>.topbar{padding:0 12px;gap:8px;height:46px;min-height:46px}.topbar .summon{font-size:0;padding:8px;gap:0;min-width:32px}.topbar .summon kbd{display:none}}

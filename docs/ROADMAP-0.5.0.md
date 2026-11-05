@@ -14,3 +14,16 @@
 - 功能完成后集中验收真实 Pixiv、识图、ComfyUI 冷启动和 Anima 单图；分别发布安装包、ZIP、SHA256、截图并提交 GitHub。
 
 本机 Comfy Desktop 安装记录：`%APPDATA%\Comfy Desktop\installations.json`；安装目录 `E:\Comfy-Desktop\ComfyUI-Installs\ComfyUI`。存在 standalone-env 和旧 .venv，必须检测实际可用解释器，不能硬编码旧路径。
+# 开发进度（2026-11-04）
+
+0.4.0 已独立交付，固定入口已更新，源码提交 `ea08fe2` 已推送。0.5.0 尚未交付，不应以当前 0.4.0 安装包作为插画功能成品。
+
+已开始实现：
+
+- `src/shared/illustration.ts`：独立项目、参考来源、画师映射、参数版本与生成快照。
+- `src/main/illustration/store.ts`：独立 SQLite 存储；重启标记未知结果，不自动重放。
+- `src/main/illustration/launcher.ts`：读取 Comfy Desktop 安装记录、连接检测、端口冲突、单次启动、模型路径和启动日志。未做真实冷启动验收。
+- `src/main/illustration/pixiv.ts`：独立登录浏览窗口，无应用 preload，禁用应用权限；少量读取当前页面链接和作品公开元数据。尚未接入界面或做真实登录验收。
+
+以上通过 TypeScript 检查；仍需完成管理器／页面、参考图受控读取、识图与提示词、Anima 调度／恢复／取消、LoRA 复用、主聊天入口，之后统一进行集成与真实服务验收。Pixiv DOM 提取必须以实际站点验证，不能凭编译通过认定功能可用。现有安装包不包含这些开发中的模块。
+

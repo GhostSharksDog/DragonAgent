@@ -1,6 +1,6 @@
 import Ajv from 'ajv';
 import type { ValidateFunction } from 'ajv';
-import type { ToolContext, ToolDefinition, ToolResult, ToolSchema } from './types.js';
+import type { ToolContext, ToolDefinition, ToolResult, ToolSchema, ToolMiddleware } from './types.js';
 import { BudgetExceeded } from './types.js';
 /** One shared gate for effects whose conflicts cannot be proven disjoint. Reads may overlap. */
 export class ExecutionGate {
@@ -16,6 +16,8 @@ export class ExecutionGate {
   }
 }
 export class ToolRegistry {
+  private middleware: ToolMiddleware[] = [];
+  use(middleware: ToolMiddleware) { this.middleware.push(middleware); return () => { this.middleware=this.middleware.filter(m=>m!==middleware); }; }
   private tools = new Map<string, { definition: ToolDefinition; validate: ValidateFunction }>();
   private ajv = new Ajv({ strict: false, allErrors: true, validateFormats: false });
   readonly gate = new ExecutionGate();
@@ -25,22 +27,27 @@ export class ToolRegistry {
     this.tools.set(definition.name, { definition, validate: this.ajv.compile(definition.parameters) });
     return () => { if (this.tools.get(definition.name)?.definition === definition) this.tools.delete(definition.name); };
   }
+  canParallel(name:string) { const d=this.tools.get(name)?.definition;return d?.effect==='read'&&d.parallelSafe===true; }
   schemas(): ToolSchema[] { return [...this.tools.values()].map(({ definition: d }) => ({ name: d.name, description: d.description, parameters: d.parameters })); }
   async call(name: string, args: unknown, context: ToolContext): Promise<ToolResult> {
     context.signal.throwIfAborted(); const item = this.tools.get(name);
-    if (!item) return { isError: true, text: `工具不存在：${name}` };
-    if (!item.validate(args)) return { isError: true, text: `工具参数无效：${this.ajv.errorsText(item.validate.errors)}` };
-    const execute = async () => {
+    if (!item) return { isError: true, errorKind: 'validation', text: `工具不存在：${name}` };
+    if (!item.validate(args)) return { isError: true, errorKind: 'validation', text: `工具参数无效：${this.ajv.errorsText(item.validate.errors)}` };
+    const execute = async (): Promise<ToolResult> => {
       context.signal.throwIfAborted();
-      if (item.definition.authorize && !await item.definition.authorize(args as Record<string, unknown>, context)) return { isError: true, text: '此工具不在当前 Agent 的授权范围内。' };
-      if (item.definition.effect === 'read' && context.agent.grant?.approvalMode === 'ask' && !await context.approve(name, JSON.stringify(args, null, 2))) return { isError: true, text: '用户拒绝了本次读取。' };
-      if (['write', 'unknown'].includes(item.definition.effect) && item.definition.approval !== 'managed' && !await context.approve(name, JSON.stringify(args, null, 2))) return { isError: true, text: '用户拒绝了本次操作。' };
+      if (item.definition.authorize && !await item.definition.authorize(args as Record<string, unknown>, context)) return { isError: true, errorKind: 'denied', text: '此工具不在当前 Agent 的授权范围内。' };
+      if (item.definition.effect === 'read' && item.definition.approval !== 'managed' && context.agent.grant?.approvalMode === 'ask' && !await context.approve(name, JSON.stringify(args, null, 2))) return { isError: true, errorKind: 'denied', text: '用户拒绝了本次读取。' };
+      if (['write', 'unknown'].includes(item.definition.effect) && item.definition.approval !== 'managed' && !await context.approve(name, JSON.stringify(args, null, 2))) return { isError: true, errorKind:'denied', text: '用户拒绝了本次操作。' };
+      context.signal.throwIfAborted();
+      const observedContext=():ToolContext=>Object.freeze({...context,agent:structuredClone(context.agent)});
+      for(const middleware of this.middleware) await middleware.beforeExecute?.(name, Object.freeze(structuredClone(args as Record<string, unknown>)), observedContext());
       context.signal.throwIfAborted();
       const result = await item.definition.execute(args as Record<string, unknown>, context);
       if (!result || typeof result.text !== 'string') throw new Error('工具返回格式无效。');
+      for(const middleware of this.middleware) await middleware.afterExecute?.(name, Object.freeze(structuredClone(result)), observedContext());
       return result;
     };
     try { return await (['write', 'unknown'].includes(item.definition.effect) ? this.gate.execute(context.signal, execute) : execute()); }
-    catch (error) { if (context.signal.aborted || error instanceof BudgetExceeded) throw error; return { isError: true, text: (error as Error).message }; }
+    catch (error) { if (context.signal.aborted || error instanceof BudgetExceeded) throw error; return { isError: true, errorKind: ['write','unknown'].includes(item.definition.effect) ? 'unknown' : (error as Error).name === 'TimeoutError' ? 'timeout' : 'service', text: (error as Error).message }; }
   }
 }

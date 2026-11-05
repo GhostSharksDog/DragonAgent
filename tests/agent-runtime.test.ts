@@ -60,15 +60,17 @@ test('child limit pauses the task; a resumed task retains completed child proven
   const next = await runtime.run({ sessionId: 's', profileId: 'p', prompt: 'summarize', grant }); assert.equal(next.status, 'completed'); assert(next.messages.some(m => m.text.includes('child result')));
   assert.equal((await store.listAgents('s')).filter(a => a.parentId).length, 1);
 });
-test('child permission expansion is refused and entire tree shares request budget', async () => {
+test('child permission expansion is refused and request count is shared without pausing', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'dragon-bound-'));
   const { runtime } = harness(async r => {
     const last = r.messages.at(-1)!;
     if (last.role === 'user') return response(tool('agent_spawn', { title: 'escape', task: 'read', folders: [os.tmpdir()] }));
+    if (last.role === 'tool' && !last.isError) return response({ role: 'assistant', text: 'done' });
     assert.equal(last.isError, true); assert(last.text.includes('不能扩大')); return response(tool('todo_write', { todos: [] }, String(r.messages.length)));
   });
-  const result = await runtime.run({ sessionId: 's', profileId: 'p', prompt: 'go', grant: { ...grant, folders: [root] }, limits: { concurrency: 1, children: 2, requests: 2 } });
-  assert.equal(result.status, 'paused'); assert.equal(result.requests, 2);
+  const result = await runtime.run({ sessionId: 's', profileId: 'p', prompt: 'go', grant: { ...grant, folders: [root] }, limits: { concurrency: 1, children: 2, requests: null } });
+  assert.equal(result.status, 'completed'); assert(result.requests > 1, '不限时请求次数仍按整棵任务树统计');
+  const capped=await runtime.run({sessionId:'limited',profileId:'p',prompt:'go',grant:{...grant,folders:[root]},limits:{concurrency:1,children:2,requests:1}});assert.equal(capped.status,'paused');assert.equal(capped.requests,1);
 });
 test('stop one child leaves its sibling running; root cancel drains children', async () => {
   const ids: string[] = []; let waitStarted!: () => void; const ready = new Promise<void>(r => { waitStarted = r; });
@@ -97,4 +99,11 @@ test('SQLite recovery preserves events and repairs missing results without repla
   const next = new SqliteSessionStore(file); assert.equal((await next.getAgent('s'))!.status, 'interrupted');
   const h = harness(async r => { assert(r.messages.some(m => m.callId === 'unknown' && m.isError)); return response({ role: 'assistant', text: 'inspect first' }); }, new ToolRegistry(), next as any);
   const result = await h.runtime.run({ sessionId: 's', profileId: 'p', prompt: 'continue', grant }); assert.equal(result.status, 'completed'); next.close();
+});
+
+test('DeepSeek ����ǿ�����������ô���ÿ��ģ������', async () => {
+  const seen: (string | undefined)[] = [];
+  const { runtime } = harness(async request => { seen.push(request.reasoningEffort); return response({ role: 'assistant', text: 'ok' }); });
+  await runtime.run({ sessionId: 'effort', profileId: 'p', prompt: 'go', grant, reasoningEffort: 'max' });
+  assert.deepEqual(seen, ['max']);
 });

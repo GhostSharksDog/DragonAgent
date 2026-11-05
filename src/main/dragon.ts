@@ -61,19 +61,20 @@ export class DragonBackend implements AgentBackend, ToolBridge {
         let result: unknown;
         if (message.kind === 'tool') result = await this.options.tool(message.agent, message.params.name, message.params.arguments, signal);
         else if (message.kind === 'question') result = await b.hooks.request({ id: message.request, kind: 'question', title: `${prefix}需要你的回答`, details: '', questions: message.params.questions }, signal);
-        else result = await b.hooks.request({ id: message.request, kind: 'approval', toolId: message.params.callId ? message.agent.title==='Codex 工具通道'?message.params.callId:`${message.agent.id}:${message.params.callId}` : undefined, title: prefix + message.params.title, details: message.params.details }, signal);
+        else result = await b.hooks.request({ id: message.request, kind: 'approval', source:{agentId:message.agent.id,title:message.agent.parentId?message.agent.title:'主任务'}, toolId: message.params.callId ? message.agent.title==='Codex 工具通道'?message.params.callId:`${message.agent.id}:${message.params.callId}` : undefined, title: prefix + message.params.title, details: message.params.details }, signal);
         signal.throwIfAborted(); this.worker?.postMessage({ reply: message.request, result });
       } catch (error) { this.worker?.postMessage({ reply: message.request, error: sanitizeDiagnostic((error as Error).message) }); }
       finally { this.incoming.delete(message.request); } return;
     }
     if (message.event !== 'core') return;
     const e = message.data as AgentEvent, b = this.bindings.get(e.sessionId); if (!b || b.session.runId !== e.runId) return;
-    if (e.type === 'agent') { const a = e.agent; this.options.agent(e.sessionId, { id: a.id, parentId: a.parentId, runId: a.runId, title: a.title, status: a.status, profileId: a.profileId, result: a.result, error: a.error, requests: a.requests, usage: a.usage }); }
+    if (e.type === 'agent') { const a = e.agent; this.options.agent(e.sessionId, { id: a.id, parentId: a.parentId, runId: a.runId, title: a.title, goal:a.goal, steps:a.steps, status: a.status, profileId: a.profileId, result: a.result, error: a.error, requests: a.requests, usage: a.usage }); }
     if (b.signal.aborted) return;
+    if (e.type === 'request') b.hooks.attempt?.(e.attempt,e.agentId);
     if (e.type === 'text' && e.agentId === e.sessionId) b.hooks.text(e.text);
     if (e.type === 'usage' && e.agentId === e.sessionId) b.hooks.usage(e.usage);
     if (e.type === 'tool.started') b.hooks.tool({ id: `${e.agentId}:${e.call.id}`, name: e.call.name, arguments: e.call.arguments, status: 'running', agentId: e.agentId });
-    if (e.type === 'tool.finished') b.hooks.tool({ id: `${e.agentId}:${e.callId}`, name: '', result: e.result.text, status: e.result.isError ? 'error' : 'completed', agentId: e.agentId });
+    if (e.type === 'tool.finished') b.hooks.tool({ id: `${e.agentId}:${e.callId}`, name: '', result: e.result.text, status: e.result.errorKind==='unknown'?'unknown':e.result.errorKind==='denied'?'declined':e.result.isError ? 'error' : 'completed', agentId: e.agentId });
     if (e.type === 'compacted') b.hooks.notice('上下文已压缩；完整原始记录保存在本地。');
     if (e.type === 'notice') b.hooks.notice(e.text);
   }
@@ -81,7 +82,8 @@ export class DragonBackend implements AgentBackend, ToolBridge {
     await this.start(); signal.throwIfAborted(); this.bindings.set(session.id, { session, hooks, signal });
     const cancel = () => { void this.cancel(session).catch(() => undefined); }; signal.addEventListener('abort', cancel, { once: true });
     try {
-      const result = await this.rpc('run', { sessionId: session.id, runId: session.runId, profileId: session.profileId, prompt, system: assistantPrompt(this.options.settings().assistant) + `\n当前权限等级：${session.permissionMode ?? 'ask'}。auto 自动批准已授权范围内的操作，full 允许其他目录和网站。`, grant: sessionGrant(session), limits: limits ?? this.options.settings().limits, compact: prompt === '/compact' }, 0);
+      const effort = ['none','low','high','max'].includes(session.reasoningEffort ?? '') ? session.reasoningEffort : undefined;
+      const result = await this.rpc('run', { sessionId: session.id, runId: session.runId, profileId: session.profileId, prompt, goal:session.collaborationState?.stage==='executing'?session.collaborationState.plan?.goal:undefined, steps:session.collaborationState?.stage==='executing'?session.collaborationState.plan?.steps.map(step=>({id:step.id,title:step.title,dependsOn:step.dependsOn,status:'pending',evidenceRefs:[],checks:step.checks.map(description=>({kind:'manual',description}))})):undefined, system: assistantPrompt(this.options.settings().assistant) + `\n当前权限等级：${session.permissionMode ?? 'ask'}。auto 自动批准已授权范围内的操作，full 允许其他目录和网站。`, grant: sessionGrant(session), limits: limits ?? this.options.settings().limits, compact: prompt === '/compact', reasoningEffort: effort }, 0);
       if (result.status === 'paused') { const error = new Error(result.error ?? '达到调用预算'); error.name = 'BudgetExceeded'; throw error; }
       if (result.status === 'error') throw new Error(result.error ?? 'Agent 执行失败。');
     } finally { signal.removeEventListener('abort', cancel); this.bindings.delete(session.id); }

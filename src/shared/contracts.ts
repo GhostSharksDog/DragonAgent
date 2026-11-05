@@ -9,8 +9,22 @@ export interface CodexCatalog { status: 'idle' | 'loading' | 'ready' | 'error'; 
 export interface ChatAttachment { id: string; kind: 'file' | 'chat'; name: string; size: number; mime: string; sourceSessionId?: string; createdAt: number; extractionError?: string }
 export interface DroppedFile { path?: string; name: string; mime?: string; data?: Uint8Array }
 export type RunStatus = 'idle' | 'running' | 'waiting' | 'stopping' | 'completed' | 'cancelled' | 'error' | 'interrupted' | 'paused';
-export interface AgentTask { id: string; parentId?: string; runId: string; title: string; profileId: string; status: import('../../packages/agent-core/src/types').AgentStatus; result?: string; error?: string; requests: number; usage: { input: number; output: number } }
+export interface AgentTask {
+  id: string;
+  parentId?: string;
+  runId: string;
+  title: string;
+  goal?: string;
+  steps?: import('../../packages/agent-core/src/types').TaskStep[];
+  profileId: string;
+  status: import('../../packages/agent-core/src/types').AgentStatus;
+  result?: string;
+  error?: string;
+  requests: number;
+  usage: import('../../packages/agent-core/src/types').Usage;
+}
 export interface ModelProfile {
+  pricing?:import('./token-pricing').TokenPricing;
   id: string; name: string; provider: string; protocol: 'openai-completions' | 'openai-responses' | 'anthropic-messages';
   baseUrl: string; model: string; contextWindow: number; maxOutput: number; hasKey: boolean; deepseekSearch?: boolean;
 }
@@ -24,7 +38,7 @@ export interface AppSettings {
   assistant?: import('./persona').AssistantPreferences;
   selectedBackend?: BackendKind;
   selectedCodexModel?: string; selectedCodexEffort?: string;
-  limits: { concurrency: number; children: number; requests: number };
+  limits: { concurrency: number; children: number; requests: number | null };
   profiles: ModelProfile[]; selectedProfile: string; mcp: McpConfig[]; codexPath: string;
   pet: { visible: boolean; scale: number; alwaysOnTop: boolean; x?: number; y?: number; shortcut: string; chatMode?: 'simple' | 'detailed' };
   theme: 'light' | 'dark' | 'system';
@@ -33,12 +47,16 @@ export interface ChatMessage { sequence?: number; id: string; commandId?: string
 export interface ConversationVersion { collaborationState?: AgentSession['collaborationState']; collaborationHistory?:AgentSession['collaborationHistory']; id: string; label: string; createdAt: number; messages: ChatMessage[]; tools: ToolEvent[]; tasks?: AgentTask[]; nativeId?: string; nativeTurnId?: string; checkpoint: string; status: RunStatus; error?: string; usage?: AgentSession['usage'] }
 export interface ToolEvent { sequence?: number; id: string; name: string; arguments: string; result?: string; status: 'queued' | 'approval' | 'running' | 'completed' | 'declined' | 'error' | 'cancelled' | 'unknown'; createdAt: number; startedAt?: number; completedAt?: number; cwd?: string; exitCode?: number | null; runId: string; agentId?: string }
 export interface PendingRequest {
+  source?: {agentId:string;title:string};
+  operation?: {name:string;arguments:string};
   toolId?: string;
   id: string; kind: 'approval' | 'question'; title: string; details: string;
   questions?: { id: string; question: string; options?: string[] }[];
   sessionId: string; runId: string;
 }
 export interface AgentSession {
+  queuedMessages?: {commandId:string;text:string;attachments?:ChatAttachment[];paused:boolean}[];
+  attempts?: (import('../../packages/agent-core/src/types').RequestAttempt & {runId:string;agentId:string})[];
   collaboration?: import('./collaboration').CollaborationConfig;
   collaborationState?: import('./collaboration').CollaborationState;
   collaborationHistory?: import('./collaboration').CollaborationState[];
@@ -54,7 +72,7 @@ export interface AgentSession {
   status: RunStatus; runId?: string; error?: string; archived?: boolean;
   messages: ChatMessage[]; tools: ToolEvent[]; pending: PendingRequest[];
   origins: string[]; browserInput: boolean; terminalEnabled: boolean;
-  usage?: { input: number; output: number; context?: number; estimated?: boolean; window?: number };
+  usage?: import('../../packages/agent-core/src/types').Usage;
 }
 export interface MemoryFact { id: string; text: string; tags: string[]; createdAt: number; source?: string }
 export interface FileArtifact { id: string; name: string; path: string; size: number; mime: string; createdAt: number; runId: string; modifiedAt: number }
@@ -62,12 +80,13 @@ export interface ArtifactPreview { offset?:number; nextOffset?:number; page?:num
 export interface ProviderBalance { profileId: string; status: 'loading' | 'ready' | 'error' | 'unsupported'; available?: boolean; updatedAt?: number; error?: string; balances: { currency: string; total: string; granted: string; toppedUp: string }[] }
 export interface BackendState { state: 'stopped' | 'starting' | 'ready' | 'error'; message: string }
 export interface Snapshot {
+  illustration?: import('./illustration').IllustrationSnapshot;
   petChat?: {sessionId?:string;pinned?:boolean;draft?:string;notice?:string;attachments?:ChatAttachment[];queue?:{commandId:string;sessionId:string;text:string;attachments?:ChatAttachment[]}[]};
   artifactPreview?: ArtifactPreview;
   balances?: ProviderBalance[];
   codexCatalog: CodexCatalog;
   resolvedTheme: 'light' | 'dark';
-  workbenchPage?: 'chat' | 'settings' | 'workshop';
+  workbenchPage?: 'chat' | 'settings' | 'workshop' | 'illustration';
   workshop?: WorkshopSnapshot;
   workbenchPageRevision?: number;
   revision: number; settings: AppSettings; sessions: AgentSession[]; selectedSessionId: string | null;
@@ -76,6 +95,7 @@ export interface Snapshot {
   petView: 'hidden' | 'compose' | 'reply' | 'quota'; animationStartedAt: number; version: string;
 }
 export interface BackendHooks {
+  attempt?(attempt:import('../../packages/agent-core/src/types').RequestAttempt,agentId:string):void;
   nativeTurnId?(id: string): void;
   text(text: string, replace?: boolean): void;
   tool(event: Partial<ToolEvent> & { id: string; name: string }): void;
@@ -89,7 +109,7 @@ export interface AgentBackend {
   cancel(session: AgentSession): Promise<void>;
   dispose(): Promise<void>;
 }
-export type Action = WorkshopAction
+export type Action = {type:'window.exit'} | import('./illustration').IllustrationAction | WorkshopAction
   | {type:'pet.chat.bind';id?:string;pinned:boolean}
   | {type:'pet.chat.draft';text:string}
   | {type:'pet.chat.send';text:string;commandId:string}
@@ -109,6 +129,7 @@ export type Action = WorkshopAction
   | { type: 'codex.models' }
   | { type: 'session.codexModel'; id: string; model: string; effort?: string }
   | { type: 'session.model'; id: string; profileId: string }
+  | { type: 'session.reasoning'; id: string; effort?: string }
   | { type: 'session.permissionMode'; id: string; mode: PermissionMode }
   | { type: 'session.attachDrop'; id: string; files: DroppedFile[] }
   | { type: 'session.attachFiles'; id: string }
@@ -121,6 +142,8 @@ export type Action = WorkshopAction
   | { type: 'session.draft'; id: string; text: string }
   | { type: 'session.workspace'; id: string }
   | { type: 'session.permissions'; id: string; origins: string[]; browserInput: boolean; terminalEnabled: boolean }
+  | { type:'session.cancelQueued';id:string;commandId:string }
+  | { type:'session.resumeQueued';id:string }
   | { type: 'session.send'; id: string; text: string; commandId: string }
   | { type: 'session.stop'; id: string }
   | { type: 'agent.stop'; id: string; agentId: string }

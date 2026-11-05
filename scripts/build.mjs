@@ -11,7 +11,7 @@ for (const relative of ['dist/main', 'dist/host', 'dist/assets', 'dist/licenses'
 }
 await mkdir('packages/agent-core/dist', { recursive: true });
 await Promise.all([
-  ...['index', 'agent-worker', 'workshop-worker'].map(name => build({ entryPoints: [`src/main/${name}.ts`], outfile: `dist/main/${name}.cjs`, bundle: true, platform: 'node', format: 'cjs', packages: 'external', target: 'node24', sourcemap: true })),
+  ...['index', 'agent-worker', 'workshop-worker', 'illustration-worker'].map(name => build({ entryPoints: [`src/main/${name}.ts`], outfile: `dist/main/${name}.cjs`, bundle: true, platform: 'node', format: 'cjs', packages: 'external', target: 'node24', sourcemap: true })),
   build({ entryPoints: ['src/main/preload.ts'], outfile: 'dist/main/preload.cjs', bundle: true, platform: 'node', format: 'cjs', external: ['electron'], target: 'node24' }),
   build({ entryPoints: ['packages/agent-core/src/index.ts', 'packages/agent-core/src/sqlite-store.ts'], outdir: 'packages/agent-core/dist', bundle: true, platform: 'node', format: 'esm', packages: 'external', target: 'node24', sourcemap: true }),
   viteBuild({ base: './', build: { outDir: 'dist/renderer', emptyOutDir: true } }),

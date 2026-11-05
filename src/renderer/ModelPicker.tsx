@@ -5,6 +5,15 @@ import { Icon } from './Icons';
 
 const effortNames: Record<string, string> = { none: '关闭', minimal: '极低', low: '低', medium: '中等', high: '高', xhigh: '极高', max: '最高', ultra: '极致' };
 export const effortLabel = (value?: string) => value ? effortNames[value] ?? value : '推理强度';
+/** DeepSeek 官方思考模式档位：关闭 / 低 / 高（默认）/ 最高。 */
+export const DEEPSEEK_EFFORTS = [
+  { value: 'none', description: '关闭思考模式，直接回答，速度最快。' },
+  { value: 'low', description: '轻量思考，响应更快。' },
+  { value: 'high', description: 'DeepSeek 官方默认强度，兼顾质量与速度。' },
+  { value: 'max', description: '最充分的思考，耗时最长。' },
+];
+export const isDeepSeekProfile = (profile?: Pick<ModelProfile, 'baseUrl' | 'model'>) => !!profile && (/deepseek/i.test(profile.baseUrl) || /deepseek/i.test(profile.model));
+export const deepseekEffort = (value?: string) => DEEPSEEK_EFFORTS.some(e => e.value === value) ? value! : 'high';
 export function codexLabel(session: AgentSession, catalog: CodexCatalog) {
   return catalog.models.find(m => m.model === session.model)?.name ?? session.model ?? catalog.models.find(m => m.isDefault)?.name ?? 'Codex';
 }
@@ -27,7 +36,7 @@ export function ReasoningControl({ session, model, act, openModels, save }: { se
   };
   const current = options[index] ?? options[selected];
   return <section className={`reasoning-control ${index === max && max > 0 ? 'at-max' : ''} ${burst ? 'peak-burst' : ''}`} aria-label="Codex 推理设置" aria-busy={saving}>
-    <div className="reasoning-heading"><Icon name="lightning" size={15}/><strong title={current.description} aria-live="polite">{effortLabel(current.value)}</strong><button aria-label="重置推理强度" title={`恢复模型默认：${effortLabel(model.defaultEffort)}`} disabled={saving} onClick={() => { const next = Math.max(0, options.findIndex(e => e.value === model.defaultEffort)); change(next); void commit(next); }}><Icon name="reset" size={15}/></button></div>
+    <div className="reasoning-heading"><Icon name="lightning" size={15}/><strong title={current.description} aria-live="polite">{effortLabel(current.value)}</strong><button aria-label="重置推理强度" title={`恢复模型默认：${effortLabel(model.defaultEffort)}`} disabled={saving} onMouseDown={e => e.preventDefault()} onClick={() => { const next = Math.max(0, options.findIndex(e => e.value === model.defaultEffort)); change(next); void commit(next); }}><Icon name="reset" size={15}/></button></div>
     <button className="reasoning-model" onClick={openModels} title="选择模型">{model.name}<Icon name="chevron" size={12}/></button>
     <div className="reasoning-track" style={{ '--effort-fill': `${max ? index / max * 100 : 100}%` } as React.CSSProperties}>
       <div className="reasoning-glow" aria-hidden="true"/><span className="reasoning-burst" aria-hidden="true">✦</span>
@@ -44,6 +53,37 @@ export function ReasoningPicker({ session, catalog, act, openModels }: { session
   if (catalog.status === 'error') return <><p className="catalog-error">{catalog.error || '读取失败'}</p><button className="menu-action" onClick={() => void act({ type: 'codex.models' })}>重新加载</button></>;
   if (!current) return <button className="menu-action" onClick={openModels}>选择模型后设置推理强度</button>;
   return <ReasoningControl key={current.model} session={session} model={current} act={act} openModels={openModels}/>;
+}
+export function DeepSeekReasoningControl({ session, profile, act, openModels }: { session: AgentSession; profile: ModelProfile; act(a: Action): Promise<unknown>; openModels(): void }) {
+  const options = DEEPSEEK_EFFORTS, selectedValue = deepseekEffort(session.reasoningEffort), selected = Math.max(0, options.findIndex(e => e.value === selectedValue));
+  const [index, setIndex] = useState(selected), [burst, setBurst] = useState(false), [saving, setSaving] = useState(false);
+  const pending = useRef(false), timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => { setIndex(selected); }, [selected, profile.id]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const max = options.length - 1, current = options[index] ?? options[selected];
+  const change = (next: number) => { setIndex(next); if (next === max && max > 0 && index < max) { setBurst(true); clearTimeout(timer.current); timer.current = setTimeout(() => setBurst(false), 1400); } };
+  const commit = async (next: number, effort?: string) => {
+    if (pending.current) return;
+    pending.current = true; setSaving(true);
+    try { const ok = await act({ type: 'session.reasoning', id: session.id, effort }); if (ok === undefined) setIndex(selected); }
+    finally { pending.current = false; setSaving(false); }
+  };
+  return <section className={`reasoning-control ${index === max && max > 0 ? 'at-max' : ''} ${burst ? 'peak-burst' : ''}`} aria-label="DeepSeek 推理设置" aria-busy={saving}>
+    <div className="reasoning-heading"><Icon name="lightning" size={15}/><strong title={current.description} aria-live="polite">{effortLabel(current.value)}</strong><button aria-label="恢复默认推理强度" title="恢复 DeepSeek 默认：高" disabled={saving} onMouseDown={e => e.preventDefault()} onClick={() => { const next = Math.max(0, options.findIndex(e => e.value === 'high')); change(next); void commit(next, undefined); }}><Icon name="reset" size={15}/></button></div>
+    <button className="reasoning-model" onClick={openModels} title="选择模型">{profile.name}<Icon name="chevron" size={12}/></button>
+    <div className="reasoning-track" style={{ '--effort-fill': `${max ? index / max * 100 : 100}%` } as React.CSSProperties}>
+      <div className="reasoning-glow" aria-hidden="true"/><span className="reasoning-burst" aria-hidden="true">✦</span>
+      <div className="reasoning-dots" aria-hidden="true">{options.map((e, i) => <i key={e.value} className={i <= index ? 'filled' : ''} title={effortLabel(e.value)}/>)}</div>
+      <input type="range" aria-label="DeepSeek 推理强度" aria-valuetext={`${effortLabel(current.value)} (${current.value})`} min={0} max={max} step={1} value={index} disabled={saving} onChange={e => change(Number(e.target.value))} onPointerUp={e => void commit(Number(e.currentTarget.value), options[Number(e.currentTarget.value)]?.value)} onKeyUp={e => { if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(e.key)) void commit(Number(e.currentTarget.value), options[Number(e.currentTarget.value)]?.value); }} onBlur={e => void commit(Number(e.currentTarget.value), options[Number(e.currentTarget.value)]?.value)}/>
+    </div>
+    <span className="sr-only" role="status">{saving ? '正在保存' : '下一条消息生效'}</span>
+  </section>;
+}
+export function DeepSeekReasoningPicker({ session, profiles, act, openModels }: { session: AgentSession; profiles: ModelProfile[]; act(a: Action): Promise<unknown>; openModels(): void }) {
+  const profile = profiles.find(p => p.id === session.profileId);
+  if (!profile) return <p className="menu-footnote">请先在模型列表里选择一个 DeepSeek 连接。</p>;
+  if (!isDeepSeekProfile(profile)) return <p className="menu-footnote">推理强度只对 DeepSeek 模型生效；当前连接是 {profile.model}。</p>;
+  return <><DeepSeekReasoningControl session={session} profile={profile} act={act} openModels={openModels}/></>;
 }
 export function ModelPicker({ session, profiles, catalog, act, close }: { session: AgentSession; profiles: ModelProfile[]; catalog: CodexCatalog; act(a: Action): Promise<unknown>; close(): void }) {
   const [tab, setTab] = useState<'codex'|'dragon'|'collaboration'>(session.collaboration?.enabled?'collaboration':session.backend), [choosing, setChoosing] = useState(false);

@@ -7,7 +7,7 @@ import type { AgentSession, AppSettings, MemoryFact } from '../shared/contracts'
 export interface PersistentState { petChat?:import('../shared/contracts').Snapshot['petChat']; settings: AppSettings; sessions: AgentSession[]; selectedSessionId: string | null; memory: MemoryFact[]; imports: string[]; pendingSessionDeletes?: string[] }
 export function initialState(): PersistentState {
   return {
-    settings: { profiles: [], selectedProfile: '', codexPath: '', theme: 'light', limits: { concurrency: 3, children: 12, requests: 64 },
+    settings: { profiles: [], selectedProfile: '', codexPath: '', theme: 'light', limits: { concurrency: 3, children: 12, requests: null },
       pet: { visible: false, scale: 1, alwaysOnTop: true, shortcut: 'CommandOrControl+Alt+D' },
       mcp: [{ id: 'tavily', name: 'Tavily 网页搜索', enabled: false, transport: 'streamable-http', url: 'https://mcp.tavily.com/mcp/', hasKey: false }] },
     sessions: [], selectedSessionId: null, memory: [], imports: [],
@@ -23,14 +23,14 @@ export class Store {
   load(): PersistentState {
     const row = this.db.prepare('SELECT version,json FROM app_state WHERE id=1').get();
     if (!row) return initialState();
-    if (row.version !== 1 && row.version !== 2 && row.version !== 3) throw new Error('数据版本不受支持，请使用匹配版本的 DragonAgent。');
-    if (row.version !== 3) {
+    if (row.version !== 1 && row.version !== 2 && row.version !== 3 && row.version !== 4) throw new Error('数据版本不受支持，请使用匹配版本的 DragonAgent。');
+    if (row.version !== 4) {
       const filename = this.db.prepare('PRAGMA database_list').get()!.file as string;
       this.db.prepare('VACUUM INTO ?').run(`${filename}.v${row.version}-${Date.now()}.bak`);
     }
     const state = JSON.parse(String(row.json)) as PersistentState;
     if(state.petChat?.queue?.length)state.petChat.notice='上次待发送消息已保留，未自动重放。请核对后重新发送。';
-    state.settings.limits ??= { concurrency: 3, children: 12, requests: 64 };
+    state.settings.limits ??= { concurrency: 3, children: 12, requests: null };
     for (const session of state.sessions) {
       if (![...session.messages,...session.tools].some(item=>item.sequence!==undefined)) {
         [...session.messages,...session.tools].sort((a,b)=>a.createdAt-b.createdAt).forEach((item,index)=>{item.sequence=index+1;});
@@ -45,10 +45,10 @@ export class Store {
       session.pending = []; // Permissions are never replayed after a restart.
       for (const task of session.tasks ?? []) if (['queued', 'running', 'waiting'].includes(task.status)) task.status = 'interrupted';
     }
-    if (row.version !== 3) this.save(state);
+    if (row.version !== 4) { state.settings.limits.requests = null; this.save(state); }
     return state;
   }
-  save(state: PersistentState) { this.db.prepare('INSERT INTO app_state VALUES(1,3,?) ON CONFLICT(id) DO UPDATE SET version=3,json=excluded.json').run(JSON.stringify(state)); }
+  save(state: PersistentState) { this.db.prepare('INSERT INTO app_state VALUES(1,4,?) ON CONFLICT(id) DO UPDATE SET version=4,json=excluded.json').run(JSON.stringify(state)); }
   secret(id: string): Uint8Array | undefined { return this.db.prepare('SELECT encrypted FROM secrets WHERE id=?').get(id)?.encrypted as Uint8Array | undefined; }
   setSecret(id: string, value: Uint8Array) { this.db.prepare('INSERT INTO secrets VALUES(?,?) ON CONFLICT(id) DO UPDATE SET encrypted=excluded.encrypted').run(id, value); }
   removeSecret(id: string) { this.db.prepare('DELETE FROM secrets WHERE id=?').run(id); }

@@ -20,5 +20,6 @@ export class SqliteSessionStore implements SessionStore {
   async history(id: string): Promise<AgentEvent[]> { return this.db.prepare('SELECT seq,json FROM events WHERE session_id=? ORDER BY seq').all(id).map(r => ({ ...JSON.parse(String(r.json)), seq: Number(r.seq) })); }
   async putAttachment(sessionId: string, text: string) { const id = randomUUID(); this.db.prepare('INSERT INTO attachments VALUES(?,?,?)').run(id, sessionId, text); return id; }
   async readAttachment(sessionId: string, id: string, offset: number, limit: number) { const row = this.db.prepare('SELECT substr(content,?,?) AS content FROM attachments WHERE id=? AND session_id=?').get(offset + 1, limit, id, sessionId); if (!row) throw new Error('附件不存在或不属于此会话。'); return String(row.content); }
+  async deleteSession(sessionId:string) {this.db.exec('BEGIN IMMEDIATE');try{for(const table of ['agents','events','attachments'])this.db.prepare(`DELETE FROM ${table} WHERE session_id=?`).run(sessionId);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
   close() { this.db.close(); }
 }

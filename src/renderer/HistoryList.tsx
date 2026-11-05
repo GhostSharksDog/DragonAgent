@@ -6,6 +6,7 @@ import { Icon } from './Icons';
 export function HistoryList({ sessions, selectedId, select, act, compact = false }: {
   sessions: AgentSession[]; selectedId?: string | null; select(id: string): void; act(a: Action): Promise<unknown>; compact?: boolean;
 }) {
+  
   const [deleting, setDeleting] = useState<string | null>(null), [saving, setSaving] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null), opener = useRef<HTMLButtonElement | null>(null);
   const target = sessions.find(s => s.id === deleting);
