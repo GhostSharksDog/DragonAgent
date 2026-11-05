@@ -9,12 +9,25 @@ interface VideoSpriteProps {
   onError?: (message: string) => void;
 }
 
+/** video 只解码不出图，画面统一画到 canvas 上。 */
+const decodeOnly: React.CSSProperties = {
+  position: 'absolute',
+  left: 0,
+  top: 0,
+  width: 1,
+  height: 1,
+  opacity: 0,
+  pointerEvents: 'none',
+};
+
 /**
- * 透明 webm 动画通道：两个 <video> 交替换源，新片加载完成后再把旧片压到背景，
- * 避免切换瞬间露出黑底或空帧（与 dsh-pet 的 A/B 双缓冲同一思路）。
+ * 透明 webm 动画通道：两个 <video> 交替缓冲解码，再逐帧绘制到 canvas。
+ *
+ * 为什么不直接把 <video> 显示出来：Windows 上的透明窗口不会合成 video 图层，
+ * 元素样式正常也只会透出背景。canvas 走普通绘制路径，透明背景可以正常合成。
  */
 export function VideoSprite({ skin, animationKey, width, height, onError }: VideoSpriteProps) {
-  const host = useRef<HTMLDivElement>(null);
+  const canvas = useRef<HTMLCanvasElement>(null);
   const slots = useRef<(HTMLVideoElement | null)[]>([]);
   const front = useRef(0);
   const currentFile = useRef('');
@@ -29,6 +42,32 @@ export function VideoSprite({ skin, animationKey, width, height, onError }: Vide
     left: width / 2 - manifest.anchor.x * scale,
     top: height - 8 - manifest.anchor.y * scale,
   };
+
+  // 逐帧把当前前台的 video 画进 canvas，只在画面真的变了的时候重绘。
+  useEffect(() => {
+    const target = canvas.current;
+    const context = target?.getContext('2d');
+    if (!target || !context) return;
+    let frame = 0, lastKey = '';
+    const paint = () => {
+      const source = slots.current[front.current];
+      if (source && source.readyState >= 2 && source.videoWidth) {
+        const key = `${source.src}#${source.currentTime}`;
+        if (key !== lastKey) {
+          lastKey = key;
+          if (target.width !== source.videoWidth || target.height !== source.videoHeight) {
+            target.width = source.videoWidth;
+            target.height = source.videoHeight;
+          }
+          context.clearRect(0, 0, target.width, target.height);
+          context.drawImage(source, 0, 0, target.width, target.height);
+        }
+      }
+      frame = requestAnimationFrame(paint);
+    };
+    frame = requestAnimationFrame(paint);
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   useEffect(() => {
     const elements = slots.current.filter((element): element is HTMLVideoElement => !!element);
@@ -53,11 +92,7 @@ export function VideoSprite({ skin, animationKey, width, height, onError }: Vide
         void target.play().catch(() => undefined);
       }
       if (cancelled) return;
-      target.classList.add('is-front');
-      if (outgoing && outgoing !== target) {
-        outgoing.classList.remove('is-front');
-        if (!loop) outgoing.pause();
-      }
+      if (outgoing && outgoing !== target && !loop) outgoing.pause();
       front.current = targetIndex;
     };
     void swap();
@@ -71,11 +106,11 @@ export function VideoSprite({ skin, animationKey, width, height, onError }: Vide
   }, []);
 
   if (!video) return null;
-  return <div ref={host} className="sprite-canvas video-canvas">
-    <div className="video-frame" style={{ position: 'absolute', overflow: 'hidden', ...box, transform: video.flipX ? 'scaleX(-1)' : undefined }}>
-      <video ref={element => { slots.current[0] = element; }} className="pet-video" muted playsInline preload="auto" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', opacity: 0, transition: 'opacity .12s linear', pointerEvents: 'none', background: 'transparent' }} />
-      <video ref={element => { slots.current[1] = element; }} className="pet-video" muted playsInline preload="auto" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', opacity: 0, transition: 'opacity .12s linear', pointerEvents: 'none', background: 'transparent' }} />
+  return <div className="sprite-canvas video-canvas">
+    <div className="video-frame" style={{ position: 'absolute', ...box, transform: video.flipX ? 'scaleX(-1)' : undefined }}>
+      <canvas ref={canvas} style={{ display: 'block', width: '100%', height: '100%' }} />
+      <video ref={element => { slots.current[0] = element; }} muted playsInline preload="auto" style={decodeOnly} />
+      <video ref={element => { slots.current[1] = element; }} muted playsInline preload="auto" style={decodeOnly} />
     </div>
-    <style>{`.pet-video.is-front{opacity:1}`}</style>
   </div>;
 }

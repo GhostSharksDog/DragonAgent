@@ -3,6 +3,7 @@ import type { IllustrationAction } from '../shared/illustration';
 import { siteIcon } from './favicon';
 import { civitaiNetwork } from './workshop/network';
 import { app, BrowserWindow, ipcMain, protocol, net, shell, dialog, Menu, Tray, nativeImage, globalShortcut, screen, nativeTheme } from 'electron';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Store, importLegacy } from './store';
@@ -15,7 +16,7 @@ import { WorkshopManager } from './workshop/manager';
 import { copyFile, readFile } from 'node:fs/promises';
 import type { WorkshopAction } from '../shared/workshop';
 
-protocol.registerSchemesAsPrivileged(['pet-skin', 'workshop', 'artifact', 'site-icon', 'illustration'].map(scheme => ({ scheme, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } })));
+protocol.registerSchemesAsPrivileged(['pet-skin', 'workshop', 'artifact', 'site-icon', 'illustration'].map(scheme => ({ scheme, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, ...(scheme === 'pet-skin' ? { stream: true } : {}) } })));
 if (process.env.DRAGON_DATA_DIR) app.setPath('userData', path.resolve(process.env.DRAGON_DATA_DIR));
 else app.setPath('userData', path.join(app.getPath('appData'), 'DragonAgent'));
 let runtime: Runtime, workbench: BrowserWindow, pet: BrowserWindow, bubble: BrowserWindow, tray: Tray;
@@ -163,7 +164,7 @@ else {
     try { await loadSkin(path.join(skins, 'skin.json')); } catch { skins = path.join(root, 'assets/skins/silver-dragon-frames'); }
     runtime.view.skin = await loadSkin(path.join(skins, 'skin.json'));
     const civitaiFetch=civitaiNetwork(()=>runtime.secrets.get('workshop:civitai'));
-    workshop = new WorkshopManager({ home, fetch: civitaiFetch, workerPath: path.join(root, 'main/workshop-worker.cjs'), bundledSkin: path.join(skins, 'skin.json'),
+    workshop = new WorkshopManager({ home, fetch: civitaiFetch, workerPath: path.join(root, 'main/workshop-worker.cjs'), bundledSkin: path.join(root, 'assets/skins/silver-dragon-frames/skin.json'),
       changed: () => syncWorkshop(),
       skin: skin => { runtime.view.skin = skin; runtime.view.animationStartedAt = Date.now(); },
       preferences: () => runtime.state.settings.assistant, profiles: () => runtime.state.settings.profiles, key: id => runtime.secrets.get(id),
@@ -185,10 +186,15 @@ else {
         return new Response(new Uint8Array(await readFile(item.path)),{headers:{'Content-Type':item.mime,'X-Content-Type-Options':'nosniff','Access-Control-Allow-Origin':'*','Content-Security-Policy':"default-src 'none'; script-src artifact: 'unsafe-inline'; style-src artifact: 'unsafe-inline'; img-src artifact: data:; font-src artifact:; connect-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts"}});
       }catch{return new Response('文件已改变、移动或未登记',{status:404});}
     });
-    protocol.handle('pet-skin', request => {
+    protocol.handle('pet-skin', async request => {
       const u = new URL(request.url), relative = decodeURIComponent(u.pathname).replace(/^\/+/, '');
       const target = path.resolve(skins, relative);
       if (u.hostname !== 'asset' || !target.startsWith(path.resolve(skins) + path.sep)) return new Response('Forbidden', { status: 403 });
+      // webm 需要显式 MIME 与长度，file:// 推断出的类型会让 <video> 拒绝加载。
+      if (/\.webm$/i.test(target)) {
+        const data = await fs.readFile(target);
+        return new Response(new Uint8Array(data), { headers: { 'Content-Type': 'video/webm', 'Content-Length': String(data.byteLength), 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' } });
+      }
       return net.fetch(pathToFileURL(target).href);
     });
     workbench = prepareWorkbench(); pet = createWindow('pet'); bubble = createWindow('bubble');
