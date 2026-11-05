@@ -1,0 +1,67 @@
+{
+  "name": "蓝色大肥鱼 · 视频",
+  "width": 640,
+  "height": 360,
+  "anchor": {
+    "x": 320,
+    "y": 306
+  },
+  "animations": {},
+  "videos": {
+    "idle": {
+      "file": "idle.webm"
+    },
+    "walking-left": {
+      "file": "walk-left.webm"
+    },
+    "walking-right": {
+      "file": "walk-left.webm",
+      "flipX": true
+    },
+    "running-left": {
+      "file": "run.webm"
+    },
+    "running-right": {
+      "file": "run.webm",
+      "flipX": true
+    },
+    "thinking": {
+      "file": "thinking.webm"
+    },
+    "speaking": {
+      "file": "speaking.webm"
+    },
+    "awaiting-input": {
+      "file": "waiting.webm"
+    },
+    "awaiting-approval": {
+      "file": "approve.webm"
+    },
+    "success": {
+      "file": "success.webm",
+      "loop": false
+    },
+    "error": {
+      "file": "error.webm",
+      "loop": false
+    },
+    "drag": {
+      "file": "drag.webm"
+    },
+    "click": {
+      "file": "click.webm",
+      "loop": false
+    },
+    "sleep-start": {
+      "file": "sleep-start.webm",
+      "loop": false
+    },
+    "sleep-loop": {
+      "file": "sleep-loop.webm"
+    },
+    "sleep-end": {
+      "file": "sleep-end.webm",
+      "loop": false
+    }
+  }
+}

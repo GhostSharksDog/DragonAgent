@@ -5,6 +5,7 @@ import { petChatLauncherRect } from '../shared/pet-chat-launcher';
 import { Egg, Icon } from './icons';
 import { RigCanvas } from './RigCanvas';
 import { FrameSprite } from './FrameSprite';
+import { VideoSprite } from './VideoSprite';
 import { PetClickController } from './pet-click-controller';
 
 export const activityLabels: Record<AppSnapshot['assistant']['activity'], string> = {
@@ -85,7 +86,7 @@ export function Pet({ snapshot }: { snapshot: AppSnapshot | null }) {
         if (moves[event.key]) { event.preventDefault(); gesture.current?.cancel(); void window.pet.drag(...moves[event.key]).catch(() => setError(true)); }
       }}>
       <span id="pet-status" className="sr-only">{failedFrame ? '动画加载失败，请检查素材' : error ? '右键打开完整对话查看状态' : activityLabels[activity]}</span>
-      {skin?.manifest.rig && !failedFrame ? <RigCanvas skin={skin} playback={snapshot?.rigPlayback ?? { control: { activity, motion: snapshot?.motion ?? "idle", direction: snapshot?.direction ?? "right" }, startedAt: snapshot?.animationStartedAt ?? rigStarted.current }} width={viewport.width} height={viewport.height} view={{ scale: spriteScale, x: viewport.width / 2 - skin.manifest.anchor.x * spriteScale, y: viewport.height - 8 - skin.manifest.anchor.y * spriteScale }} onError={() => setFailedFrame(true)} /> : skin && !failedFrame ? <FrameSprite skin={skin} animationKey={name} startedAt={snapshot?.animationStartedAt} width={viewport.width} height={viewport.height} onError={() => setFailedFrame(true)} /> : <Egg className="pet-egg" />}
+      {skin?.manifest.rig && !failedFrame ? <RigCanvas skin={skin} playback={snapshot?.rigPlayback ?? { control: { activity, motion: snapshot?.motion ?? "idle", direction: snapshot?.direction ?? "right" }, startedAt: snapshot?.animationStartedAt ?? rigStarted.current }} width={viewport.width} height={viewport.height} view={{ scale: spriteScale, x: viewport.width / 2 - skin.manifest.anchor.x * spriteScale, y: viewport.height - 8 - skin.manifest.anchor.y * spriteScale }} onError={() => setFailedFrame(true)} /> : skin && !failedFrame && skin.manifest.videos && Object.keys(skin.manifest.videos).length ? <VideoSprite skin={skin} animationKey={name} width={viewport.width} height={viewport.height} onError={() => setFailedFrame(true)} /> : skin && !failedFrame ? <FrameSprite skin={skin} animationKey={name} startedAt={snapshot?.animationStartedAt} width={viewport.width} height={viewport.height} onError={() => setFailedFrame(true)} /> : <Egg className="pet-egg" />}
       {(!skin || failedFrame) && <span className="pet-placeholder-label">{failedFrame ? '素材加载失败' : '临时形象'}</span>}
     </button>
     <button className={`pet-chat-launcher${snapshot?.assistant.pending.length ? ' has-pending' : ''}`} style={{ left: launcher.x, top: launcher.y, width: launcher.width, height: launcher.height, borderRadius: launcher.radius }} aria-label="输入消息" aria-pressed={composeOpen}

@@ -1,5 +1,6 @@
 import { WebLink } from './WebLink';
 import {remarkEmphasis,copyProse} from './remark-emphasis';
+import {remarkCjkLink} from './remark-cjk-link';
 import React, { useRef, useState } from 'react';
 import Markdown, { defaultUrlTransform } from 'react-markdown';
 import type { FileArtifact } from '../shared/contracts';
@@ -21,7 +22,7 @@ function CodeBlock({ children }: { children?: React.ReactNode }) {
 }
 export function RichText({ text, files=[], sessionId }: { text: string; files?:FileArtifact[]; sessionId?:string }) {
   const match=(href:string)=>{try{const normalized=decodeURIComponent(href).replace(/^file:\/\/\/?/i,'').replace(/^\/([a-z]:)/i,'$1').replace(/:\d+(?::\d+)?$/,'').replace(/\\/g,'/').toLowerCase();return files.find(f=>f.path.replace(/\\/g,'/').toLowerCase()===normalized);}catch{return undefined;}};
-  return <div className="rich-text"><Markdown remarkPlugins={[remarkGfm,remarkEmphasis]} rehypePlugins={[rehypeHighlight]} urlTransform={url=>match(url)?url:defaultUrlTransform(url)} components={{
+  return <div className="rich-text"><Markdown remarkPlugins={[remarkGfm,remarkCjkLink,remarkEmphasis]} rehypePlugins={[rehypeHighlight]} urlTransform={url=>match(url)?url:defaultUrlTransform(url)} components={{
     pre: CodeBlock,
     a: ({ href, children }) => {const file=match(href??'');return file&&sessionId?<button className="plain file-link" onClick={()=>void window.dragon.action({type:'artifact.preview',sessionId,artifactId:file.id})}>{children}</button>:/^https?:\/\//i.test(href ?? '') ? <WebLink href={href!}>{children}</WebLink> : <span title={href}>{children}</span>;},
     img: ({ alt }) => <span className="hint">{alt ? `图片：${alt}` : '图片'}</span>,

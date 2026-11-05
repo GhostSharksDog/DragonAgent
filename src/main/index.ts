@@ -1,3 +1,5 @@
+import { IllustrationManager } from './illustration/manager';
+import type { IllustrationAction } from '../shared/illustration';
 import { siteIcon } from './favicon';
 import { civitaiNetwork } from './workshop/network';
 import { app, BrowserWindow, ipcMain, protocol, net, shell, dialog, Menu, Tray, nativeImage, globalShortcut, screen, nativeTheme } from 'electron';
@@ -13,11 +15,12 @@ import { WorkshopManager } from './workshop/manager';
 import { copyFile, readFile } from 'node:fs/promises';
 import type { WorkshopAction } from '../shared/workshop';
 
-protocol.registerSchemesAsPrivileged(['pet-skin', 'workshop', 'artifact', 'site-icon'].map(scheme => ({ scheme, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } })));
+protocol.registerSchemesAsPrivileged(['pet-skin', 'workshop', 'artifact', 'site-icon', 'illustration'].map(scheme => ({ scheme, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } })));
 if (process.env.DRAGON_DATA_DIR) app.setPath('userData', path.resolve(process.env.DRAGON_DATA_DIR));
 else app.setPath('userData', path.join(app.getPath('appData'), 'DragonAgent'));
 let runtime: Runtime, workbench: BrowserWindow, pet: BrowserWindow, bubble: BrowserWindow, tray: Tray;
 let workshop: WorkshopManager;
+let illustration: IllustrationManager;
 let quitting = false;
 const windows = new Set<BrowserWindow>();
 const root = path.resolve(__dirname, '..');
@@ -25,8 +28,8 @@ const branding = path.join(root, 'assets/branding');
 async function open(url: string) { const value = new URL(url); if (!['https:', 'http:'].includes(value.protocol)) throw new Error('只允许打开网页链接。'); await shell.openExternal(value.href); }
 function createWindow(kind: 'workbench' | 'pet' | 'bubble') {
   const transparent = kind !== 'workbench';
-  const theme = runtime.view.resolvedTheme, colors = theme === 'dark' ? { background: '#24212d', symbol: '#e4ddef' } : { background: '#ffffff', symbol: '#20242e' };
-  const win = new BrowserWindow({ ...(transparent ? {} : { titleBarStyle: 'hidden' as const, titleBarOverlay: { color: colors.background, symbolColor: colors.symbol, height: 48 } }), icon: path.join(branding, 'dragon.ico'), width: kind === 'workbench' ? 1260 : kind === 'pet' ? 272 : 390, height: kind === 'workbench' ? 850 : kind === 'pet' ? 296 : 460, minWidth: kind === 'workbench' ? 850 : undefined, minHeight: kind === 'workbench' ? 600 : undefined, title: 'DragonAgent', show: false, frame: !transparent, transparent, backgroundColor: transparent ? '#00000000' : colors.background, resizable: !transparent, hasShadow: !transparent, skipTaskbar: transparent, alwaysOnTop: transparent, autoHideMenuBar: true, webPreferences: { preload: path.join(root, 'main/preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true } });
+  const theme = runtime.view.resolvedTheme, colors = theme === 'dark' ? { background: '#1e1b25', symbol: '#e4ddef' } : { background: '#f6f7f9', symbol: '#20242e' };
+  const win = new BrowserWindow({ ...(transparent ? {} : { titleBarStyle: 'hidden' as const, titleBarOverlay: { color: colors.background, symbolColor: colors.symbol, height: 36 } }), icon: path.join(branding, 'dragon.ico'), width: kind === 'workbench' ? 1260 : kind === 'pet' ? 272 : 390, height: kind === 'workbench' ? 850 : kind === 'pet' ? 296 : 460, minWidth: kind === 'workbench' ? 850 : undefined, minHeight: kind === 'workbench' ? 600 : undefined, title: 'DragonAgent', show: false, frame: !transparent, transparent, backgroundColor: transparent ? '#00000000' : colors.background, resizable: !transparent, hasShadow: !transparent, skipTaskbar: transparent, alwaysOnTop: transparent, autoHideMenuBar: true, webPreferences: { preload: path.join(root, 'main/preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true } });
   windows.add(win); win.on('closed', () => windows.delete(win));
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
@@ -39,7 +42,7 @@ function syncTheme() {
   const configured = runtime.state.settings.theme;
   runtime.view.resolvedTheme = configured === 'system' ? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light') : configured;
   const dark = runtime.view.resolvedTheme === 'dark';
-  if (workbench && !workbench.isDestroyed() && appliedTheme !== runtime.view.resolvedTheme) { appliedTheme = runtime.view.resolvedTheme; workbench.setBackgroundColor(dark ? '#24212d' : '#ffffff'); workbench.setTitleBarOverlay({ color: dark ? '#24212d' : '#ffffff', symbolColor: dark ? '#e4ddef' : '#20242e', height: 48 }); }
+  if (workbench && !workbench.isDestroyed() && appliedTheme !== runtime.view.resolvedTheme) { appliedTheme = runtime.view.resolvedTheme; workbench.setBackgroundColor(dark ? '#1e1b25' : '#f6f7f9'); workbench.setTitleBarOverlay({ color: dark ? '#1e1b25' : '#f6f7f9', symbolColor: dark ? '#e4ddef' : '#20242e', height: 36 }); }
 }
 /** 工坊快照附带“是否已保存 Civitai 密钥”，让界面能显示真实状态，而不是靠输入框是否为空来猜。 */
 function syncWorkshop() {
@@ -47,29 +50,45 @@ function syncWorkshop() {
   runtime.changed(false);
 }
 function moveBubble() {
+  if (!pet || pet.isDestroyed() || !bubble || bubble.isDestroyed() || quitting) return;
   const r = pet.getBounds(), area = screen.getDisplayMatching(r).workArea;
   const b = bubble.getBounds(); const left = r.x - b.width - 12 >= area.x;
   bubble.setPosition(Math.round(left ? r.x - b.width - 12 : Math.min(area.x + area.width - b.width, r.x + r.width + 12)), Math.round(Math.max(area.y, Math.min(area.y + area.height - b.height, r.y + r.height - b.height))));
 }
 function syncWindows() {
+  if (!pet || pet.isDestroyed() || !bubble || bubble.isDestroyed() || quitting) return;
   const config = runtime.state.settings.pet;
   const size = Math.round(272 * config.scale), height = Math.round(296 * config.scale);
   if (pet.getBounds().width !== size) pet.setSize(size, height);
   pet.setAlwaysOnTop(config.alwaysOnTop, 'floating'); bubble.setAlwaysOnTop(config.alwaysOnTop, 'floating');
   if (config.visible) pet.showInactive(); else pet.hide();
-  const bubbleHeight = runtime.view.petView === 'quota' || config.chatMode === 'detailed' ? 460 : 256;
-  if (bubble.getBounds().height !== bubbleHeight) {
+  const quota = runtime.view.petView === 'quota', wantWidth = quota ? 390 : 360, wantHeight = quota ? 460 : 100;
+  if (bubble.getBounds().height !== wantHeight || bubble.getBounds().width !== wantWidth) {
     // Windows locks min/max bounds on non-resizable windows; unlock only for this programmatic resize.
-    bubble.setResizable(true); bubble.setSize(390, bubbleHeight); bubble.setResizable(false);
+    bubble.setResizable(true); bubble.setSize(wantWidth, wantHeight); bubble.setResizable(false);
   }
   moveBubble();
   if (config.visible && runtime.view.petView !== 'hidden') bubble.showInactive(); else bubble.hide();
 }
-function showWorkbench() { workbench.show(); if (workbench.isMinimized()) workbench.restore(); workbench.focus(); }
+function prepareWorkbench() {
+  const win = createWindow('workbench');
+  win.on('close', event => { if (!quitting) { event.preventDefault(); win.hide(); } });
+  win.once('ready-to-show', () => { if (!quitting && !win.isDestroyed()) { win.show(); win.focus(); } });
+  return win;
+}
+function showWorkbench() {
+  if (quitting || !runtime) return;
+  if (!workbench || workbench.isDestroyed()) { workbench = prepareWorkbench(); return; }
+  workbench.show(); if (workbench.isMinimized()) workbench.restore(); workbench.focus();
+}
 function togglePet() { runtime.state.settings.pet.visible = !runtime.state.settings.pet.visible; runtime.changed(); syncWindows(); }
 function menu() { Menu.buildFromTemplate([{ label: '打开 DragonAgent', click: showWorkbench }, { label: runtime.state.settings.pet.visible ? '收起龙娘' : '召唤龙娘', click: togglePet }, { type: 'separator' }, { label: '退出', click: () => app.quit() }]).popup(); }
 async function action(value: Action) {
   if (!value || typeof value !== 'object' || typeof value.type !== 'string') throw new Error('无效操作。');
+  if(value.type==='window.exit'){app.quit();return;}
+  if(value.type==='illustration.lora.import'){const result=await dialog.showOpenDialog(workbench,{title:'选择角色 LoRA',properties:['openFile'],filters:[{name:'SafeTensors',extensions:['safetensors']}]});if(!result.canceled)return illustration.importLora(value.id,result.filePaths[0]);return;}
+  if(value.type==='illustration.save'){const p=illustration.state.projects.find(p=>p.id===value.id),run=p?.runs.find(r=>r.id===value.runId);if(!run?.file)throw Error('图片尚未生成');const source=await illustration.asset(run.file);const result=await dialog.showSaveDialog(workbench,{defaultPath:p!.name.replace(/[<>:"/\\|?*]/g,'_')+'.png'});if(result.filePath&&!result.canceled)await copyFile(source,result.filePath);return;}
+  if(value.type.startsWith('illustration.'))return illustration.action(value as IllustrationAction);
   switch (value.type) {
     case 'pet.chat.pickFiles': {const result=await dialog.showOpenDialog(bubble,{title:'给龙娘添加参考文件',properties:['openFile','multiSelections']});if(!result.canceled)return runtime.action({type:'pet.chat.attach',files:result.filePaths.map(file=>({path:file,name:path.basename(file)}))});return;}
     case 'artifact.reveal': {const item=await runtime.artifacts.resolve(runtime.session(value.sessionId),value.artifactId);shell.showItemInFolder(item.path);return true;}
@@ -118,7 +137,7 @@ async function action(value: Action) {
       if (!result.canceled) { s.workspace = result.filePaths[0]; runtime.changed(); } return;
     }
     case 'session.attachFiles': {
-      const s=runtime.session(value.id); if(isBusy(s)||s.readOnly)throw new Error('当前不能添加文件。');
+      const s=runtime.session(value.id); if(s.readOnly)throw new Error('当前不能添加文件。');
       const result=await dialog.showOpenDialog(workbench,{title:'给龙娘添加参考文件',properties:['openFile','multiSelections'],filters:[{name:'文档、图片与代码',extensions:['txt','md','pdf','docx','csv','json','ts','js','tsx','jsx','html','css','png','jpg','jpeg','webp','gif']},{name:'所有文件',extensions:['*']}]});
       if(!result.canceled)await runtime.attachFiles(s.id,result.filePaths); return;
     }
@@ -140,7 +159,8 @@ else {
     syncTheme();
     nativeTheme.on('updated', () => { syncTheme(); runtime.changed(false); });
     if (!runtime.state.settings.codexPath && app.isPackaged) runtime.state.settings.codexPath = path.join(root, 'runtime/codex/bin/codex.exe');
-    const skins = path.join(root, 'assets/skins/silver-dragon-frames');
+    let skins = path.join(root, 'assets/skins/blue-fish');
+    try { await loadSkin(path.join(skins, 'skin.json')); } catch { skins = path.join(root, 'assets/skins/silver-dragon-frames'); }
     runtime.view.skin = await loadSkin(path.join(skins, 'skin.json'));
     const civitaiFetch=civitaiNetwork(()=>runtime.secrets.get('workshop:civitai'));
     workshop = new WorkshopManager({ home, fetch: civitaiFetch, workerPath: path.join(root, 'main/workshop-worker.cjs'), bundledSkin: path.join(skins, 'skin.json'),
@@ -150,6 +170,10 @@ else {
     });
     syncWorkshop();
     await workshop.init();
+    illustration=new IllustrationManager({workerPath:path.join(root,'main/illustration-worker.cjs'),home,appData:app.getPath('appData'),fetch:civitaiFetch,loras:()=>workshop.state.projects,profiles:()=>runtime.state.settings.profiles,key:id=>runtime.secrets.get(id),changed:()=>{runtime.view.illustration=illustration.state;runtime.changed(false);}});
+    runtime.view.illustration=illustration.state;
+    runtime.illustration={list:()=>illustration.state.projects.map(p=>({id:p.id,name:p.name,status:p.status})),create:async(description,commandId)=>{const id=await illustration.action({type:'illustration.create',description,commandId});runtime.view.workbenchPage='illustration';runtime.view.workbenchPageRevision=(runtime.view.workbenchPageRevision??0)+1;runtime.changed(false);showWorkbench();return {id,status:'project-created',message:'已创建插画项目，尚未生成图片'};}};
+    protocol.handle('illustration',async request=>{try{const u=new URL(request.url);if(u.hostname!=='asset')throw Error('无效素材');return await net.fetch(pathToFileURL(await illustration.asset(decodeURIComponent(u.pathname.slice(1)))).href);}catch{return new Response('素材不可用',{status:404});}});
     protocol.handle('site-icon',async request=>{const u=new URL(request.url);if(u.hostname!=='icon')return new Response('',{status:404});const image=await siteIcon(decodeURIComponent(u.pathname.slice(1)));return image?new Response(new Uint8Array(image),{headers:{'Content-Type':'image/png','Cache-Control':'max-age=300'}}):new Response('',{status:404});});
     protocol.handle('workshop', async request => {
       try { const u = new URL(request.url); return await net.fetch(pathToFileURL(await workshop.asset(u.hostname, u.pathname)).href); }
@@ -167,12 +191,10 @@ else {
       if (u.hostname !== 'asset' || !target.startsWith(path.resolve(skins) + path.sep)) return new Response('Forbidden', { status: 403 });
       return net.fetch(pathToFileURL(target).href);
     });
-    workbench = createWindow('workbench'); pet = createWindow('pet'); bubble = createWindow('bubble');
+    workbench = prepareWorkbench(); pet = createWindow('pet'); bubble = createWindow('bubble');
     const area = screen.getPrimaryDisplay().workArea, config = runtime.state.settings.pet;
     pet.setPosition(Math.round(Math.max(area.x, Math.min(config.x ?? area.x + area.width - 300, area.x + area.width - 272))), Math.round(Math.max(area.y, Math.min(config.y ?? area.y + area.height - 320, area.y + area.height - 296))));
     pet.on('move', moveBubble);
-    workbench.on('close', event => { if (!quitting) { event.preventDefault(); workbench.hide(); } });
-    workbench.once('ready-to-show', showWorkbench);
     pet.once('ready-to-show', syncWindows);
     const icon = nativeImage.createFromPath(path.join(branding, 'dragon-avatar.png')).resize({ width: 32, height: 32 });
     tray = new Tray(icon); tray.setToolTip('DragonAgent · 龙娘工作台'); tray.on('click', showWorkbench); tray.on('right-click', menu);
@@ -192,5 +214,5 @@ else {
   }).catch(error => { console.error(error); dialog.showErrorBox('DragonAgent 启动失败', String(error.message)); app.exit(1); });
 }
 app.on('window-all-closed', () => undefined);
-app.on('before-quit', event => { if (quitting) return; event.preventDefault(); quitting = true; globalShortcut.unregisterAll(); void (async () => { try { await workshop?.dispose(); } finally { await runtime?.dispose(); } })().finally(() => { tray?.destroy(); app.quit(); }); });
+app.on('before-quit', event => { if (quitting) return; event.preventDefault(); quitting = true; globalShortcut.unregisterAll(); void (async () => { try { await illustration?.close(); await workshop?.dispose(); } finally { await runtime?.dispose(); } })().finally(() => { tray?.destroy(); app.quit(); }); });
 

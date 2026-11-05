@@ -56,7 +56,8 @@ export function skinFrameLayout(manifest: Pick<SkinManifest, 'width' | 'height'>
   const image = { left: -crop.x * fit, top: -crop.y * fit, width: source.width * fit, height: source.height * fit };
   return { frame: cell.frame, source, crop, destination, image };
 }
-export interface SkinManifest { name: string; width: number; height: number; anchor: { x: number; y: number }; animations: Record<string, SkinAnimation>; rig?: import('./rig').RigDefinition }
+export interface SkinVideo { file: string; loop?: boolean; flipX?: boolean }
+export interface SkinManifest { name: string; width: number; height: number; anchor: { x: number; y: number }; animations: Record<string, SkinAnimation>; videos?: Record<string, SkinVideo>; rig?: import('./rig').RigDefinition }
 export interface SkinData { manifest: SkinManifest; baseUrl: string }
 export type BubbleMode = 'hidden' | 'quick' | 'panel';
 export type QuickView = 'chat' | 'compose' | 'quota';

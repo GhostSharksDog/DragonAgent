@@ -81,7 +81,8 @@ export async function loadSkin(manifestPath: string): Promise<SkinData> {
     raw.animations ??= {};
     return { manifest: raw, baseUrl: 'pet-skin://asset/' };
   }
-  if (!raw.animations || typeof raw.animations !== 'object' || Array.isArray(raw.animations) || !raw.animations.idle) throw new Error('角色素材必须提供 idle 待机动作。');
+  if (!raw.animations || typeof raw.animations !== 'object' || Array.isArray(raw.animations)) throw new Error('角色动作配置无效。');
+  if (!raw.animations.idle && !raw.videos?.idle) throw new Error('角色素材必须提供 idle 待机动作。');
   const root = await fs.realpath(path.dirname(manifestPath));
   if (Object.keys(raw.animations).length > 40) throw new Error('动作数量过多。');
   for (const animation of Object.values(raw.animations)) {
@@ -107,6 +108,19 @@ export async function loadSkin(manifestPath: string): Promise<SkinData> {
       const relative = path.relative(root, real);
       if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('角色图片不能链接到素材文件夹之外。');
       if ((await fs.stat(real)).size > 16 * 1024 * 1024) throw new Error('单张图片不能超过 16 MB。');
+    }
+  }
+  if (raw.videos !== undefined) {
+    const videos = raw.videos;
+    if (!videos || typeof videos !== 'object' || Array.isArray(videos)) throw new Error('视频动作配置无效。');
+    if (Object.keys(videos).length > 40) throw new Error('视频动作数量过多。');
+    for (const [key, entry] of Object.entries(videos)) {
+      if (!/^[a-z0-9-]{1,32}$/.test(key)) throw new Error('视频动作名只能使用小写字母、数字和连字符。');
+      if (!entry || typeof entry.file !== 'string' || !/\.webm$/i.test(entry.file) || path.isAbsolute(entry.file) || entry.file.includes('\\') || entry.file.includes(':') || entry.file.includes('%') || entry.file.split('/').some(part => part === '..' || part === '.')) throw new Error('视频动作必须是素材文件夹内的 webm 相对路径。');
+      if (entry.loop !== undefined && typeof entry.loop !== 'boolean' || entry.flipX !== undefined && typeof entry.flipX !== 'boolean') throw new Error('视频循环与翻转设置必须为布尔值。');
+      const real = await fs.realpath(path.join(root, entry.file)), relative = path.relative(root, real);
+      if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('视频动作不能链接到素材文件夹之外。');
+      if ((await fs.stat(real)).size > 32 * 1024 * 1024) throw new Error('单个视频动作不能超过 32 MB。');
     }
   }
   return { manifest: raw, baseUrl: 'pet-skin://asset/' };
