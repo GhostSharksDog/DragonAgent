@@ -28,18 +28,17 @@ try {
   await textarea.click();
   await page.keyboard.type('gu');
   assert.equal(await textarea.inputValue(), 'gu');
-  // 真实输入法输入时，草稿的 IPC 往返会晚于本地按键到达；这里直接模拟迟到的旧草稿。
-  await act({ type: 'session.draft', id, text: '旧草稿' });
+  // 真实输入法输入时，草稿的 IPC 往返会晚于本地按键到达；模拟一个之前确实发送过的旧值回声。
+  await act({ type: 'session.draft', id, text: 'g' });
   await page.waitForTimeout(350);
-  assert.equal(await textarea.inputValue(), 'gu', '聚焦输入时旧草稿不应覆盖正在输入的内容');
-  report.checks.push('聚焦输入时迟到的旧草稿不会覆盖输入框内容');
+  assert.equal(await textarea.inputValue(), 'gu', '自己旧草稿的迟到回声不应覆盖正在输入的内容');
+  report.checks.push('迟到的旧草稿回声不会覆盖输入框内容');
 
-  // 失焦后外部草稿仍应同步（例如会话切换、清空草稿）。
-  await page.locator('.topbar strong').click();
+  // 外部设置（另一个入口恢复草稿、清空或队列）即使聚焦也要生效。
   await act({ type: 'session.draft', id, text: '外部草稿' });
   await page.waitForTimeout(350);
-  assert.equal(await textarea.inputValue(), '外部草稿', '失焦后应同步外部草稿');
-  report.checks.push('失焦后仍能同步外部草稿');
+  assert.equal(await textarea.inputValue(), '外部草稿', '外部设置的草稿应同步到输入框');
+  report.checks.push('外部设置的草稿在聚焦时仍能同步');
 
   assert.deepEqual(errors, [], `页面异常：${errors.join('; ')}`);
   report.passed = true;

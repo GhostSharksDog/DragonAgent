@@ -38,6 +38,7 @@ const decodeOnly: React.CSSProperties = {
  */
 export function VideoSprite({ skin, animationKey, width, height, mirror = false, onError, onEnded }: VideoSpriteProps) {
   const canvas = useRef<HTMLCanvasElement>(null);
+  const host = useRef<HTMLDivElement>(null);
   const slots = useRef<(HTMLVideoElement | null)[]>([]);
   const front = useRef(0);
   const ended = useRef(onEnded);
@@ -83,6 +84,7 @@ export function VideoSprite({ skin, animationKey, width, height, mirror = false,
           }
           context.clearRect(0, 0, area.width, area.height);
           context.drawImage(source, area.x, area.y, area.width, area.height, 0, 0, area.width, area.height);
+          if (host.current && host.current.dataset.ready !== 'true') host.current.dataset.ready = 'true';
           if (fading && fade) {
             // 旧姿势盖在新姿势上淡出，动作衔接看起来像过渡而不是跳帧。
             context.globalAlpha = Math.max(0, 1 - elapsed / FADE_MS);
@@ -181,7 +183,7 @@ export function VideoSprite({ skin, animationKey, width, height, mirror = false,
   }, []);
 
   if (!video) return null;
-  return <div className="sprite-canvas video-canvas">
+  return <div ref={host} className="sprite-canvas video-canvas" data-ready="false">
     <div className="video-frame" style={{ position: 'absolute', ...box, transform: video.flipX !== mirror ? 'scaleX(-1)' : undefined }}>
       <canvas ref={canvas} style={{ display: 'block', width: '100%', height: '100%' }} />
       <video ref={element => { slots.current[0] = element; }} muted playsInline preload="auto" style={decodeOnly} />

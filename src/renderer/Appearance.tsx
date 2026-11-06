@@ -1,66 +1,43 @@
-﻿import React from 'react';
-import type {Action, AppSettings, Snapshot} from '../shared/contracts';
+import React,{useEffect,useRef,useState} from 'react';
+import type {Action,Snapshot} from '../shared/contracts';
+import {DEFAULT_APPEARANCE,appearanceValues,type AppearanceValues} from '../shared/appearance';
 import {Icon} from './Icons';
-
-type Props = { state: Snapshot; act(a: Action): Promise<unknown> };
-
-const THEMES: { id: AppSettings['theme']; title: string; caption: string }[] = [
-  { id: 'light', title: '银白', caption: '高对比，白天用' },
-  { id: 'dark', title: '月夜紫', caption: '深色，晚上用' },
-  { id: 'system', title: '跟随系统', caption: '跟着电脑切换' },
-];
-const ACCENTS: { id: AppSettings['accent']; label: string; dot: string }[] = [
-  { id: 'violet', label: '雾紫', dot: '#7250a4' },
-  { id: 'teal', label: '青碧', dot: '#2f7d72' },
-  { id: 'amber', label: '琥珀', dot: '#a2661f' },
-  { id: 'ink', label: '墨蓝', dot: '#3f5a8a' },
-];
-
-export function wallpaperUrl(file: string) { return 'wallpaper://bg/' + encodeURIComponent(file); }
-
-export function Appearance({state, act}: Props) {
-  const wallpaper = state.settings.wallpaper;
-  const accent = state.settings.accent ?? 'violet';
-  const tune = (patch: {opacity?: number; blur?: number; dim?: number}) => void act({ type: 'wallpaper.tune', ...patch });
-  return <section className="appearance-page">
-    <div className="appearance-head">
-      <div className="eyebrow">APPEARANCE STUDIO</div>
-      <h1>把这间屋子调成你喜欢的样子</h1>
-      <p className="subtitle">主题、配色和壁纸会立刻应用，并保存在本机。</p>
-    </div>
-    <div className="appearance-grid">
-      <div className="appearance-controls">
-        <section className="settings-card">
-          <div className="section-title"><h2>主题</h2><span className="tag">{state.settings.theme === 'system' ? '跟随系统 · 当前' + (state.resolvedTheme === 'dark' ? '深色' : '浅色') : state.settings.theme === 'dark' ? '深色' : '浅色'}</span></div>
-          <div className="theme-grid">{THEMES.map(theme => <button key={theme.id} className={'theme-card' + (state.settings.theme === theme.id ? ' active' : '')} onClick={() => void act({ type: 'settings.save', theme: theme.id })}><span className={'theme-thumb ' + theme.id}><i/><i/><i/></span><strong>{theme.title}</strong><small>{theme.caption}</small></button>)}</div>
-        </section>
-        <section className="settings-card">
-          <div className="section-title"><h2>配色</h2><span className="tag">{ACCENTS.find(item => item.id === accent)?.label}</span></div>
-          <div className="accent-row-list">{ACCENTS.map(item => <button key={item.id} className={'accent-choice' + (accent === item.id ? ' active' : '')} onClick={() => void act({ type: 'settings.save', accent: item.id })}><i style={{ background: item.dot }}/><span>{item.label}</span></button>)}</div>
-        </section>
-        <section className="settings-card">
-          <div className="section-title"><h2>壁纸</h2>{wallpaper && <button className="plain danger" onClick={() => void act({ type: 'wallpaper.clear' })}>移除</button>}</div>
-          {wallpaper ? <>
-            <p className="hint">{wallpaper.name}</p>
-            <label>不透明度 · {Math.round(wallpaper.opacity * 100)}%<input type="range" min="0" max="1" step="0.05" value={wallpaper.opacity} onChange={e => tune({ opacity: +e.target.value })}/></label>
-            <label>模糊 · {Math.round(wallpaper.blur)} px<input type="range" min="0" max="24" step="1" value={wallpaper.blur} onChange={e => tune({ blur: +e.target.value })}/></label>
-            <label>压暗 · {Math.round(wallpaper.dim * 100)}%<input type="range" min="0" max="0.8" step="0.05" value={wallpaper.dim} onChange={e => tune({ dim: +e.target.value })}/></label>
-          </> : <>
-            <p className="hint">选一张图作为工作台背景。图片会复制到本机数据目录，原图移动或删除都不影响。</p>
-            <button onClick={() => void act({ type: 'wallpaper.choose' })}><Icon name="folder" size={16}/>选择壁纸</button>
-          </>}
-        </section>
-      </div>
-      <aside className="appearance-preview">
-        <div className="preview-frame" style={wallpaper ? { backgroundImage: 'url(' + wallpaperUrl(wallpaper.file) + ')' } : undefined}>
-          {wallpaper && <div className="preview-veil" style={{ opacity: wallpaper.dim }}/>}
-          <div className="preview-app">
-            <div className="preview-rail"><span className="preview-avatar"/><i/><i/><i/><i/></div>
-            <div className="preview-main"><div className="preview-bar"/><div className="preview-card"/><div className="preview-card short"/><div className="preview-bubble"/></div>
-          </div>
-        </div>
-        <p className="hint">预览会随主题和配色变化；壁纸会铺在整个工作台后面。</p>
-      </aside>
-    </div>
-  </section>;
+export function wallpaperUrl(file:string){return 'wallpaper://bg/'+encodeURIComponent(file);}
+const luminance=(r:number,g:number,b:number)=>{const f=(v:number)=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4};return .2126*f(r)+.7152*f(g)+.0722*f(b);};
+/** 自定义强调色同时用于文字、选中态和主按钮背景；过亮或过暗时收敛到可读范围。 */
+export function readableAccent(hex:string,dark:boolean){
+  const match=/^#([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);if(!match)return hex;
+  let r=parseInt(match[1],16),g=parseInt(match[2],16),b=parseInt(match[3],16),l=luminance(r,g,b);
+  const min=dark?.3:.1,max=dark?.62:.52;
+  for(let i=0;i<12&&l>max;i++){r=Math.round(r*.82);g=Math.round(g*.82);b=Math.round(b*.82);l=luminance(r,g,b);}
+  for(let i=0;i<12&&l<min;i++){r=Math.round(r*.8+255*.2);g=Math.round(g*.8+255*.2);b=Math.round(b*.8+255*.2);l=luminance(r,g,b);}
+  return '#'+[r,g,b].map(v=>Math.max(0,Math.min(255,v)).toString(16).padStart(2,'0')).join('');
+}
+export function applyAppearance(values:Partial<AppearanceValues>,wallpaper?:Snapshot['settings']['wallpaper']){
+ const root=document.documentElement,a=appearanceValues(values),set=(key:string,value:string)=>root.style.setProperty(key,value);
+ set('--wallpaper-fit',a.fit);set('--wallpaper-position',`${a.x}% ${a.y}%`);set('--wallpaper-output',`${a.output*100}%`);set('--wallpaper-header',`${a.header*100}%`);set('--wallpaper-selection',`${a.selection*100}%`);set('--reading-size',`${a.fontSize}px`);root.dataset.density=a.density;
+ if(a.customAccent){const accent=readableAccent(a.customAccent,root.dataset.theme==='dark');set('--purple',accent);set('--soft',`color-mix(in srgb, ${accent} 13%, var(--panel))`);}else{root.style.removeProperty('--purple');root.style.removeProperty('--soft');}
+ if(wallpaper){set('--wallpaper-opacity',String(wallpaper.opacity));set('--wallpaper-blur',`${wallpaper.blur}px`);set('--wallpaper-dim',String(wallpaper.dim));}
+}
+function Range({title,value,min=0,max=1,step=.01,format=(v:number)=>Math.round(v*100)+'%',change,save}:{title:string;value:number;min?:number;max?:number;step?:number;format?:(v:number)=>string;change(v:number):void;save(v:number):Promise<unknown>}){
+ const [draft,setDraft]=useState(value),[error,setError]=useState('');const committed=useRef(value);
+ useEffect(()=>{setDraft(value);committed.current=value;},[value]);
+ const commit=async()=>{if(draft===committed.current)return;const next=draft;committed.current=next;try{await save(next);setError('');}catch(e){committed.current=value;setError(String(e));}};
+ return <label>{title} · {format(draft)}<input type="range" min={min} max={max} step={step} value={draft} onChange={e=>{setDraft(+e.target.value);change(+e.target.value);}} onPointerUp={()=>void commit()} onKeyUp={()=>void commit()} onBlur={()=>void commit()}/>{error&&<span className="error">{error}</span>}</label>;
+}
+export function Appearance({state,act}:{state:Snapshot;act(a:Action):Promise<unknown>}){
+ const a=state.settings.appearance??DEFAULT_APPEARANCE,w=state.settings.wallpaper;
+ const [name,setName]=useState(''),[rename,setRename]=useState(''),[error,setError]=useState(''),[draft,setDraft]=useState(a),[wall,setWall]=useState(w);
+ useEffect(()=>{setDraft(a);setWall(w);},[a,w]);
+ const run=async(action:Action)=>{try{await act(action);setError('');}catch(e){setError(String(e));throw e;}};
+ const preview=(patch:Partial<AppearanceValues>)=>{const next={...draft,...patch};setDraft(next);window.dispatchEvent(new CustomEvent('appearance-preview',{detail:{values:next,wallpaper:wall}}));};
+ const wp=(patch:Partial<NonNullable<typeof w>>)=>{if(!wall)return;const next={...wall,...patch};setWall(next);window.dispatchEvent(new CustomEvent('appearance-preview',{detail:{values:draft,wallpaper:next}}));};
+ const save=(values:Partial<AppearanceValues>)=>run({type:'appearance.save',values});
+ return <section className="appearance-page"><header className="appearance-head"><h1>工作台外观</h1><p className="hint">即时预览，松开滑块后保存。输入栏始终不透明。</p></header>{error&&<p className="error">{error}</p>}<div className="appearance-grid"><div className="appearance-controls">
+ <section className="settings-card"><h2>主题与配色</h2><div className="theme-grid">{(['light','dark','system'] as const).map((theme,i)=><button key={theme} className={'theme-card '+(state.settings.theme===theme?'active':'')} aria-pressed={state.settings.theme===theme} onClick={()=>void run({type:'settings.save',theme}).catch(()=>{})}><span className={'theme-thumb '+theme}><i/><i/><i/></span>{['银白','月夜紫','跟随系统'][i]}{state.settings.theme===theme?' ✓':''}</button>)}</div><div className="accent-row-list">{(['violet','teal','amber','ink'] as const).map((accent,i)=><button key={accent} onClick={()=>void save({customAccent:undefined}).then(()=>run({type:'settings.save',accent})).catch(()=>{})}>{['雾紫','青碧','琥珀','墨蓝'][i]}{!a.customAccent&&state.settings.accent===accent?' ✓':''}</button>)}<label>自定义<input type="color" aria-label="自定义强调色" value={draft.customAccent??'#7250a4'} onChange={e=>preview({customAccent:e.target.value})} onBlur={()=>void save({customAccent:draft.customAccent}).catch(()=>{})}/></label></div></section>
+ <section className="settings-card"><div className="section-title"><h2>壁纸库</h2><button onClick={()=>void run({type:'wallpaper.choose'}).catch(()=>{})}><Icon name="plus"/>添加壁纸</button>{w&&<button onClick={()=>void run({type:'wallpaper.clear'}).catch(()=>{})}>不使用壁纸</button>}</div><div className="wallpaper-grid">{[...a.wallpapers].sort((x,y)=>y.usedAt-x.usedAt).map(item=><div key={item.file} className={'wallpaper-item '+(w?.file===item.file?'selected':'')}><button aria-label={'使用壁纸 '+item.name} onClick={()=>void run({type:'wallpaper.select',file:item.file}).catch(()=>{})}><img src={wallpaperUrl(item.file)} alt={item.name}/><span title={item.name}>{w?.file===item.file?'✓ ':''}{item.name}</span></button><button className="plain danger" aria-label={'删除壁纸 '+item.name} onClick={()=>void run({type:'wallpaper.delete',file:item.file}).catch(()=>{})}>删除</button></div>)}</div>{!a.wallpapers.length&&<p className="hint">支持 PNG、JPEG、WebP；原图移动不会影响已添加壁纸。</p>}
+ {w&&<><label>图片布局<select value={a.fit} onChange={e=>void save({fit:e.target.value as 'cover'|'contain'}).catch(()=>{})}><option value="cover">填满</option><option value="contain">完整显示</option></select></label>{(['x','y'] as const).map((k,i)=><Range key={k} title={['水平位置','垂直位置'][i]} value={a[k]} max={100} step={1} format={v=>v+'%'} change={v=>preview({[k]:v})} save={v=>save({[k]:v})}/>)}{(['opacity','blur','dim'] as const).map((k,i)=><Range key={k} title={['壁纸不透明度','模糊','压暗'][i]} value={w[k]} max={k==='blur'?24:k==='dim'?.8:1} step={k==='blur'?1:.01} format={v=>k==='blur'?v+' px':Math.round(v*100)+'%'} change={v=>wp({[k]:v})} save={v=>run({type:'wallpaper.tune',[k]:v})}/>)}</>}
+ </section><section className="settings-card"><h2>面板与阅读</h2>{(['output','header','selection'] as const).map((k,i)=><Range key={k} title={['输出面板不透明度','顶部栏不透明度','左侧按钮不透明度'][i]} value={a[k]} change={v=>preview({[k]:v})} save={v=>save({[k]:v})}/>)}<label>正文字号<select value={a.fontSize} onChange={e=>void save({fontSize:+e.target.value as AppearanceValues['fontSize']}).catch(()=>{})}>{[14,15,16,18].map(n=><option key={n} value={n}>{n} px</option>)}</select></label><label>界面密度<select value={a.density} onChange={e=>void save({density:e.target.value as AppearanceValues['density']}).catch(()=>{})}><option value="standard">标准</option><option value="compact">紧凑</option></select></label></section>
+ <section className="settings-card"><h2>外观预设</h2><div className="actions">{['light','dark','glass'].map((id,i)=><button key={id} onClick={()=>void run({type:'appearance.preset.apply',id}).catch(()=>{})}>{['银白','月夜紫','壁纸通透'][i]}</button>)}</div><div className="preset-editor"><input placeholder="预设名称" aria-label="预设名称" value={name} onChange={e=>setName(e.target.value)}/><button disabled={!name.trim()} onClick={()=>void run({type:'appearance.preset.save',name,id:rename||undefined}).then(()=>{setName('');setRename('');}).catch(()=>{})}>{rename?'保存名称':'保存当前外观'}</button></div>{a.presets.map(p=><div className="preset-editor" key={p.id}><button className="grow" onClick={()=>void run({type:'appearance.preset.apply',id:p.id}).catch(()=>{})}>{p.name}</button><button onClick={()=>{setRename(p.id);setName(p.name);}}>重命名</button><button onClick={()=>void run({type:'appearance.preset.delete',id:p.id}).catch(()=>{})}>删除</button></div>)}<button onClick={()=>void run({type:'appearance.reset'}).catch(()=>{})}>恢复默认外观</button></section>
+ </div><aside className="appearance-preview"><div className="preview-frame"><div className="preview-wallpaper" style={wall?{backgroundImage:`url(${wallpaperUrl(wall.file)})`,backgroundSize:draft.fit,backgroundPosition:`${draft.x}% ${draft.y}%`,opacity:wall.opacity,filter:`blur(${wall.blur}px)`}:undefined}>{wall&&<i style={{opacity:wall.dim}}/>}</div><div className="appearance-live-preview"><div className="preview-navigation"><b>霜璃</b><span style={{background:`color-mix(in srgb,var(--soft) ${draft.selection*100}%,transparent)`}}>✓ 对话</span></div><div className="preview-answer" style={{background:`color-mix(in srgb,var(--bg) ${draft.output*100}%,transparent)`}}><header style={{background:`color-mix(in srgb,var(--bg) ${draft.header*100}%,transparent)`}}>DragonAgent</header><p style={{fontSize:draft.fontSize}}>这是回答预览，<strong>重点清晰可读</strong>。</p><pre>const dragon = '霜璃';</pre><div className="preview-composer">把想法交给我…<br/>＋　权限　　↑</div></div></div></div><p className="hint">真实工作台同步预览。修改后无需重启。</p></aside></div></section>;
 }

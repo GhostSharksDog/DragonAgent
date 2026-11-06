@@ -30,3 +30,5 @@
 .app-shell.left-collapsed .sidebar button svg{flex:none}
 .app-shell.left-collapsed .sidebar .new-chat>span{display:none}
 .app-shell.left-collapsed .brand{justify-content:center}
+
+.dragon-plan-card{max-width:var(--chat-width,880px);margin:18px auto;padding:20px;border:1px solid var(--purple);border-radius:16px;background:var(--panel);min-width:0}.dragon-plan-card header,.dragon-plan-card footer{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.dragon-plan-card header{justify-content:space-between;margin-bottom:14px}.dragon-plan-card footer{justify-content:flex-end;margin-top:16px}.plan-indicator{color:var(--purple);background:var(--soft);border-color:var(--line)}

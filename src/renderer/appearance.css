@@ -37,12 +37,12 @@
 .wallpaper-layer{position:absolute;inset:0;z-index:0;background:center/cover no-repeat;pointer-events:none;overflow:hidden;transform:scale(1.01)}
 .wallpaper-layer i{position:absolute;inset:0;background:#0b0713}
 .app-shell>.app-chrome,.app-shell>.sidebar,.app-shell>.main-area{position:relative;z-index:1}
-.app-shell.has-wallpaper>.main-area{background:color-mix(in srgb,var(--bg) 48%,transparent)}
-.app-shell.has-wallpaper .main-area>.topbar{background:color-mix(in srgb,var(--bg) 24%,transparent)}
-.app-shell.has-wallpaper .new-chat{background:color-mix(in srgb,var(--panel) 55%,transparent)}
+.app-shell.has-wallpaper>.main-area{background:color-mix(in srgb,var(--bg) var(--wallpaper-output,48%),transparent)}
+.app-shell.has-wallpaper .main-area>.topbar{background:color-mix(in srgb,var(--bg) var(--wallpaper-header,24%),transparent)}
+.app-shell.has-wallpaper .new-chat{background:color-mix(in srgb,var(--panel) var(--wallpaper-selection,55%),transparent)}
 .app-shell.has-wallpaper .sidebar nav button.active,
 .app-shell.has-wallpaper .sidebar-bottom>button.active,
-.app-shell.has-wallpaper .history-row.selected{background:color-mix(in srgb,var(--soft) 58%,transparent)}
+.app-shell.has-wallpaper .history-row.selected{background:color-mix(in srgb,var(--soft) var(--wallpaper-selection,58%),transparent)}
 .app-shell.has-wallpaper .new-chat:hover,
 .app-shell.has-wallpaper .sidebar nav button:hover,
 .app-shell.has-wallpaper .sidebar-bottom>button:hover,
@@ -53,3 +53,6 @@
 .app-shell.has-wallpaper .composer-wrap{background:transparent}
 .app-shell.has-wallpaper .composer{background:var(--panel);opacity:1;backdrop-filter:none}
 .app-shell.has-wallpaper .welcome{background:transparent}
+
+.wallpaper-layer{background-size:var(--wallpaper-fit,cover);background-position:var(--wallpaper-position,50% 50%)}
+.wallpaper-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px}.wallpaper-item{border:1px solid var(--line);border-radius:12px;overflow:hidden}.wallpaper-item.selected{border-color:var(--purple)}.wallpaper-item>button:first-child{display:flex;flex-direction:column;border:0;padding:6px;width:100%;min-width:0}.wallpaper-item img{width:100%;height:75px;object-fit:cover;border-radius:7px}.wallpaper-item span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}.preset-editor{display:flex;gap:8px;margin:10px 0;flex-wrap:wrap}.preset-editor input{flex:1;min-width:100px}.appearance-controls .settings-card>label{margin:14px 0}.appearance-controls .actions,.appearance-controls .section-title{flex-wrap:wrap}.appearance-page{min-width:0}.appearance-preview .preview-frame{min-height:230px;aspect-ratio:auto}.preview-wallpaper{position:absolute;inset:0;background-repeat:no-repeat}.preview-wallpaper i{position:absolute;inset:0;background:#0b0713}.appearance-live-preview{position:relative;display:grid;grid-template-columns:66px minmax(0,1fr);gap:8px;padding:10px;min-height:230px}.preview-navigation{display:flex;flex-direction:column;gap:16px}.preview-navigation span{padding:6px;border-radius:6px}.preview-answer{border-radius:10px;overflow:hidden;min-width:0}.preview-answer header{padding:8px;font-size:11px}.preview-answer p{padding:8px;margin:0}.preview-answer pre{font-size:10px;overflow:auto;padding:8px;background:var(--panel)}.preview-composer{margin:10px;padding:12px;background:var(--panel);border-radius:10px;color:var(--muted);font-size:10px}.rich-text,.timeline-entry .message{font-size:var(--reading-size,15px)}[data-density=compact] .app-shell .sidebar nav button{min-height:36px;padding-block:8px}[data-density=compact] .timeline-entry .message{margin-bottom:14px}[data-density=compact] .settings-card{padding:14px}@media(max-width:1150px){.appearance-grid{grid-template-columns:minmax(0,1fr)}.appearance-preview{position:static;grid-row:1}.appearance-page{padding:16px}.preview-frame{max-width:540px}}

@@ -55,11 +55,11 @@ try {
       overflow: getComputedStyle(root).display,
     };
   });
-  assert.match(bar.text, /1 轮 0 步/, '应显示当前任务的轮次与步骤');
-  assert.match(bar.text, /1\.3K tok/, '应显示累计 Token');
-  assert.match(bar.text, /缓存命中 75\.0%/, '应按命中/未命中显示缓存命中率');
-  assert.ok(bar.height > 30 && bar.height < 60, `状态条高度应紧凑，实际 ${bar.height}`);
-  assert.ok(bar.donut.width >= 30, '圆形上下文图应有尺寸');
+  assert.match(bar.text, /上下文 \d+(\.\d+)?%/, '应显示当前上下文占用');
+  assert.match(bar.text, /1\.3K tokens/, '应显示本任务累计 Token');
+  assert.match(bar.text, /缓存 75%/, '应按缓存读取/输入显示命中率');
+  assert.ok(bar.height >= 24 && bar.height < 60, `状态条高度应紧凑，实际 ${bar.height}`);
+  assert.ok(bar.donut.width >= 12, '圆形上下文图应有尺寸');
   assert.match(bar.donut.fill, /conic-gradient/, '圆形图应有 conic-gradient 填充');
   assert.ok(bar.doc[0] <= bar.doc[1] + 1, '状态条不应把页面撑出滚动条');
   report.bar = bar;
@@ -76,7 +76,7 @@ try {
   await page.screenshot({ path: 'test-results/context-stats-menu.png' });
   await page.locator('.context-actions > summary').click();
 
-  await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('view=workbench'))?.setSize(900, 800); });
+  await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('view=workbench'))?.setSize(700, 800); });
   await page.waitForTimeout(500);
   const narrow = await page.evaluate(() => {
     const root = document.querySelector('.context-stats-bar'), cache = document.querySelector('.cache-stat');
