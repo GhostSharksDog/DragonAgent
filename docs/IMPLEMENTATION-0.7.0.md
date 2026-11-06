@@ -34,14 +34,14 @@
 
 - `studio.update` 白名单和预算确认失效规则同上；新增 `studio.resolve`：结果未知的操作必须由用户人工核对后处理。选择“已受理”需录入方舟任务编号，随后 `studio.resume` 只查询该任务、不会重复提交；选择“未受理”会释放预留费用、标记取消并记录核对审计（时间、结论、备注）。
 - 新增 `tests/studio-flow070.test.ts` 用本地模拟方舟跑通完整链路：立绘生成 → 角色确认 → 视频任务提交/查询/下载 → 真实 FFmpeg 抠像 → 技术检查 → 人工确认 → 发布为桌宠；同时验证未受理的 503 会保留预留且禁止 resume、录入任务编号后恢复只查询不重提、确认未受理后预留释放、取消运行中任务后恢复不重提、同一生成 commandId 幂等。
-- 内置/导入的视频型桌宠会从待机视频首帧生成库内缩略图（FFmpeg），不再显示通用占位图。
+- 内置/导入的视频型桌宠会从待机视频首帧生成库内缩略图（FFmpeg），不再显示通用占位图；内置逐帧桌宠重命名后缩略图地址同步修正（此前库内显示破图）。
 - 新增 `test:media` 与 `test:planning` 已并入集中验收脚本。
 
 ### 打包与发行候选
 
 - `npm run package` 成功：`release/0.7.0/win-unpacked`、`DragonAgent-Setup-0.7.0.exe`（312.9 MB）、`DragonAgent-0.7.0-win.zip`（423.6 MB）；`SHA256SUMS.txt` 已生成。
 - 发行包抽查包含：`node_modules/fflate`、`dist/runtime/media/ffmpeg.exe`/`ffprobe.exe`/`manifest.json`、FFmpeg 许可与 README、Codex 运行时、两套内置桌宠素材；抽查未发现数据库/密钥/测试用户数据。
-- 打包后冒烟：`win-unpacked/DragonAgent.exe` 以独立数据目录启动，欢迎页视频皮肤与桌宠窗口正常，版本 0.7.0；从 ZIP 导入桌宠成功（验证 fflate 在发行包内可用）。
+- 打包后冒烟：`win-unpacked/DragonAgent.exe` 以独立数据目录启动，欢迎页视频皮肤与桌宠窗口正常，版本 0.7.0；从 ZIP 导入桌宠成功（验证 fflate 在发行包内可用）；打包版桌宠库中两套内置素材缩略图均能加载（逐帧 atlas 1632×，视频首帧 272×），验证发行包内 FFmpeg 路径。
 - **未替换固定入口 `release\win-unpacked`，未发布。**
 
 ### 外观与输入
