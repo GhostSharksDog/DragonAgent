@@ -34,8 +34,22 @@
 .appearance-legacy{margin-top:22px;padding-top:14px;border-top:1px solid var(--line)}
 /* 壁纸层：铺满工作台，菜单和面板浮在上面。 */
 .app-shell{position:relative}
-.wallpaper-layer{position:absolute;inset:0;z-index:0;border-radius:18px;background:center/cover no-repeat;pointer-events:none;overflow:hidden;transform:scale(1.01)}
+.wallpaper-layer{position:absolute;inset:0;z-index:0;background:center/cover no-repeat;pointer-events:none;overflow:hidden;transform:scale(1.01)}
 .wallpaper-layer i{position:absolute;inset:0;background:#0b0713}
 .app-shell>.app-chrome,.app-shell>.sidebar,.app-shell>.main-area{position:relative;z-index:1}
-.app-shell.has-wallpaper>.main-area{background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(14px)}
+.app-shell.has-wallpaper>.main-area{background:color-mix(in srgb,var(--bg) 48%,transparent)}
+.app-shell.has-wallpaper .main-area>.topbar{background:color-mix(in srgb,var(--bg) 24%,transparent)}
+.app-shell.has-wallpaper .new-chat{background:color-mix(in srgb,var(--panel) 55%,transparent)}
+.app-shell.has-wallpaper .sidebar nav button.active,
+.app-shell.has-wallpaper .sidebar-bottom>button.active,
+.app-shell.has-wallpaper .history-row.selected{background:color-mix(in srgb,var(--soft) 58%,transparent)}
+.app-shell.has-wallpaper .new-chat:hover,
+.app-shell.has-wallpaper .sidebar nav button:hover,
+.app-shell.has-wallpaper .sidebar-bottom>button:hover,
+.app-shell.has-wallpaper .history-row:hover{background:color-mix(in srgb,var(--soft) 72%,transparent)}
+/* Only surfaces are translucent: text and the entire composer retain full opacity. */
+.app-shell.has-wallpaper .chat-column,
+.app-shell.has-wallpaper .conversation,
+.app-shell.has-wallpaper .composer-wrap{background:transparent}
+.app-shell.has-wallpaper .composer{background:var(--panel);opacity:1;backdrop-filter:none}
 .app-shell.has-wallpaper .welcome{background:transparent}

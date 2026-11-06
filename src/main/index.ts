@@ -35,7 +35,7 @@ const PET_WIDTH = 112, PET_HEIGHT = 130;
 function createWindow(kind: 'workbench' | 'pet' | 'bubble') {
   const transparent = kind !== 'workbench';
   const theme = runtime.view.resolvedTheme, colors = theme === 'dark' ? { background: '#1e1b25', symbol: '#e4ddef' } : { background: '#f6f7f9', symbol: '#20242e' };
-  const win = new BrowserWindow({ ...(transparent ? {} : { titleBarStyle: 'hidden' as const, titleBarOverlay: { color: colors.background, symbolColor: colors.symbol, height: 36 } }), icon: path.join(branding, 'dragon.ico'), width: kind === 'workbench' ? 1260 : kind === 'pet' ? PET_WIDTH : 390, height: kind === 'workbench' ? 850 : kind === 'pet' ? PET_HEIGHT : 460, minWidth: kind === 'workbench' ? 850 : undefined, minHeight: kind === 'workbench' ? 600 : undefined, title: 'DragonAgent', show: false, frame: !transparent, transparent, backgroundColor: transparent ? '#00000000' : colors.background, resizable: !transparent, hasShadow: !transparent, skipTaskbar: transparent, alwaysOnTop: transparent, autoHideMenuBar: true, webPreferences: { preload: path.join(root, 'main/preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true } });
+  const win = new BrowserWindow({ ...(transparent ? {} : { titleBarStyle: 'hidden' as const, titleBarOverlay: { color: runtime.state.settings.wallpaper ? '#00000000' : colors.background, symbolColor: colors.symbol, height: 36 } }), icon: path.join(branding, 'dragon.ico'), width: kind === 'workbench' ? 1260 : kind === 'pet' ? PET_WIDTH : 390, height: kind === 'workbench' ? 850 : kind === 'pet' ? PET_HEIGHT : 460, minWidth: kind === 'workbench' ? 850 : undefined, minHeight: kind === 'workbench' ? 600 : undefined, title: 'DragonAgent', show: false, frame: !transparent, transparent, backgroundColor: transparent ? '#00000000' : colors.background, resizable: !transparent, hasShadow: !transparent, skipTaskbar: transparent, alwaysOnTop: transparent, autoHideMenuBar: true, webPreferences: { preload: path.join(root, 'main/preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true } });
   windows.add(win); win.on('closed', () => windows.delete(win));
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
@@ -43,12 +43,20 @@ function createWindow(kind: 'workbench' | 'pet' | 'bubble') {
   void win.loadFile(path.join(root, 'renderer/index.html'), { query: { view: kind, theme } });
   return win;
 }
-let appliedTheme: string | undefined;
+let appliedChrome: string | undefined;
 function syncTheme() {
   const configured = runtime.state.settings.theme;
   runtime.view.resolvedTheme = configured === 'system' ? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light') : configured;
   const dark = runtime.view.resolvedTheme === 'dark';
-  if (workbench && !workbench.isDestroyed() && appliedTheme !== runtime.view.resolvedTheme) { appliedTheme = runtime.view.resolvedTheme; workbench.setBackgroundColor(dark ? '#1e1b25' : '#f6f7f9'); workbench.setTitleBarOverlay({ color: dark ? '#1e1b25' : '#f6f7f9', symbolColor: dark ? '#e4ddef' : '#20242e', height: 36 }); }
+  const background = dark ? '#1e1b25' : '#f6f7f9';
+  const overlay = runtime.state.settings.wallpaper ? '#00000000' : background;
+  // Include wallpaper presence and window identity so clearing it or recreating a window updates native controls.
+  const chrome = `${workbench?.id}:${runtime.view.resolvedTheme}:${overlay}`;
+  if (workbench && !workbench.isDestroyed() && appliedChrome !== chrome) {
+    workbench.setBackgroundColor(background);
+    workbench.setTitleBarOverlay({ color: overlay, symbolColor: dark ? '#e4ddef' : '#20242e', height: 36 });
+    appliedChrome = chrome;
+  }
 }
 /** 工坊快照附带“是否已保存 Civitai 密钥”，让界面能显示真实状态，而不是靠输入框是否为空来猜。 */
 function syncWorkshop() {
