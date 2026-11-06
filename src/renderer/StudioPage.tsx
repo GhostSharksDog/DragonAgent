@@ -1,24 +1,9 @@
-import React, { useState } from 'react';
-import type { Action, Snapshot } from '../shared/contracts';
-import { Appearance } from './Appearance';
-import { PetPipeline } from './PetPipeline';
+import React from 'react';
+import type {Action,Snapshot} from '../shared/contracts';
+import {Appearance} from './Appearance';
+import {CloudPetStudio,PetLibrary} from './StudioPanels';
 import './studio-page.css';
-
-type Props = { state: Snapshot; act(a: Action): Promise<unknown> };
-
-/**
- * 外观工坊的两个分区：上面是生成桌宠的工作流，下面是工作台自身的主题、配色和壁纸。
- * 生成流程较长，单独占满一屏，避免和工作台设置挤在一起。
- */
-export function StudioPage({ state, act }: Props) {
-  const [tab, setTab] = useState<'pet' | 'desk'>('pet');
-  return <div className="studio-page">
-    <nav className="studio-page-tabs" aria-label="外观工坊分区">
-      <button className={tab === 'pet' ? 'active' : ''} aria-pressed={tab === 'pet'} onClick={() => setTab('pet')}>生成桌宠</button>
-      <button className={tab === 'desk' ? 'active' : ''} aria-pressed={tab === 'desk'} onClick={() => setTab('desk')}>工作台外观</button>
-    </nav>
-    <div className="studio-page-body">
-      {tab === 'pet' ? <PetPipeline state={state} act={act}/> : <Appearance state={state} act={act}/>}
-    </div>
-  </div>;
+export function StudioPage({state,act}:{state:Snapshot;act(a:Action):Promise<unknown>}){
+ const tab=state.settings.appearance?.tab??'desk';
+ return <div className="studio-page"><nav className="studio-page-tabs" aria-label="外观工坊分区">{(['desk','library','make'] as const).map((id,i)=><button key={id} className={tab===id?'active':''} aria-pressed={tab===id} onClick={()=>void act({type:'appearance.save',values:{},tab:id})}>{['工作台外观','桌宠库','制作桌宠'][i]}</button>)}</nav><div className="studio-page-body">{tab==='desk'?<Appearance state={state} act={act}/>:tab==='library'?<PetLibrary state={state} act={act}/>:<CloudPetStudio state={state} act={act}/>}</div></div>;
 }
