@@ -1,0 +1,34 @@
+/* 生成桌宠：dsh-pet 素材链的操作台。 */
+.pipeline-page{padding:18px 36px 48px}
+.pipeline-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap;margin-bottom:20px;max-width:1000px}
+.pipeline-head h1{margin:6px 0 8px;font-size:26px;letter-spacing:-.3px}
+.pipeline-actions{display:flex;gap:8px;flex-wrap:wrap}
+.pipeline-steps{display:flex;flex-direction:column;gap:12px;max-width:1000px}
+.pipeline-step{display:grid;grid-template-columns:34px minmax(0,1fr);gap:14px;padding:18px 20px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
+.pipeline-index{display:flex;align-items:center;justify-content:center;height:30px;border-radius:9px;background:var(--soft);color:var(--purple);font-size:12px;font-weight:600}
+.pipeline-step h2{margin:0 0 5px;font-size:15px}
+.pipeline-step p{margin:0;color:var(--muted);font-size:12.5px;line-height:1.65}
+.pipeline-specs{display:flex;flex-wrap:wrap;gap:6px;margin:11px 0 0;padding:0;list-style:none}
+.pipeline-specs li{padding:3px 9px;border-radius:999px;background:var(--side);color:var(--text);font-size:11.5px}
+.pipeline-links{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.pipeline-link{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);cursor:pointer;color:var(--text);font-size:12.5px;text-align:left}
+.pipeline-link:hover{border-color:var(--purple);color:var(--purple)}
+.pipeline-link small{display:block;color:var(--muted);font-size:11px}
+.pipeline-code{position:relative;margin-top:12px}
+.pipeline-code pre{margin:0;padding:12px 14px;border-radius:10px;background:#1e1a28;color:#e8e2f6;font-size:12px;line-height:1.75;overflow:auto}
+.pipeline-code button{position:absolute;top:8px;right:8px;padding:3px 9px;border:1px solid #4b4160;border-radius:7px;background:#2a2438;color:#cfc4e6;font-size:11.5px;cursor:pointer}
+.pipeline-note{margin-top:10px;color:var(--muted);font-size:12px;line-height:1.6}
+.pipeline-step-sleep{background:var(--soft);border-color:color-mix(in srgb,var(--purple) 30%,var(--line))}
+.pipeline-sleep{display:none}
+.pipeline-pets{max-width:1000px;margin-top:22px}
+.pipeline-pets-head{display:flex;align-items:baseline;gap:10px}
+.pipeline-pets-head h2{margin:0;font-size:15px}
+.pipeline-pets-head span{color:var(--muted);font-size:11.5px}
+.pipeline-skin-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;margin-top:12px}
+.pipeline-skin{display:flex;align-items:center;gap:10px;padding:9px;border:1px solid var(--line);border-radius:12px;background:var(--panel);cursor:pointer;text-align:left;color:var(--text)}
+.pipeline-skin img{width:44px;height:44px;border-radius:9px;object-fit:cover;background:var(--side)}
+.pipeline-skin strong{display:block;font-size:12.5px}
+.pipeline-skin small{color:var(--muted);font-size:11px}
+.pipeline-skin.selected{border-color:var(--purple);box-shadow:inset 0 0 0 1px var(--purple)}
+.pipeline-skin>svg{margin-left:auto;color:var(--purple)}
+@media(max-width:750px){.pipeline-page{padding:14px 15px 32px}}

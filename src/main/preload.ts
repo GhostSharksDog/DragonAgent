@@ -8,4 +8,5 @@ contextBridge.exposeInMainWorld('pet', {
   showReply: () => action({ type: 'pet.view', view: 'reply' }), openComposer: () => action({ type: 'pet.view', view: 'compose' }), openQuota: () => action({ type: 'pet.view', view: 'quota' }),
   refreshQuota: () => action({ type: 'quota.refresh' }), showContextMenu: () => action({ type: 'window.menu' }),
   layoutQuickBubble: async () => undefined, confirmQuickLayout: async () => undefined,
+  onGaze: (listener: (direction: 'left' | 'right' | 'center') => void) => { const receive = (_event: unknown, direction: unknown) => listener(direction as 'left' | 'right' | 'center'); ipcRenderer.on('pet:gaze', receive); return () => ipcRenderer.off('pet:gaze', receive); },
 });

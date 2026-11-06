@@ -63,5 +63,11 @@
       "file": "sleep-end.webm",
       "loop": false
     }
+  },
+  "content": {
+    "x": 160,
+    "y": 19,
+    "width": 320,
+    "height": 315
   }
 }

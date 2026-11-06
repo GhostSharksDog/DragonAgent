@@ -21,7 +21,7 @@ test('original pet distinguishes single click, double click and drag without ove
 
 test('524288 is a total-token cap and scales safely to smaller model windows', () => {
   const large = contextPolicy({ contextWindow: 1048576, maxOutput: 100000 });
-  assert.deepEqual(large, { window: 524288, output: 32768, headroom: 65536, threshold: 419430, retainRatio: .16 });
+  assert.deepEqual(large, { window: 524288, output: 32768, headroom: 65536, threshold: 262144, retainRatio: .16 });
   const small = contextPolicy({ contextWindow: 8192, maxOutput: 8192 });
   assert(small.threshold + small.output + small.headroom <= small.window);
   assert.throws(() => contextPolicy({ contextWindow: 1000, maxOutput: 1 }));

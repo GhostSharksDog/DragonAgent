@@ -3,7 +3,7 @@ export const CONTEXT_LIMIT = 524288;
 export function contextBudget(profile: Pick<ModelProfile, 'contextWindow' | 'maxOutput'>) {
   if (!Number.isSafeInteger(profile.contextWindow) || profile.contextWindow < 4096 || !Number.isSafeInteger(profile.maxOutput) || profile.maxOutput < 1) throw new Error('无效的模型上下文配置。');
   const window = Math.min(CONTEXT_LIMIT, profile.contextWindow), output = Math.min(32768, profile.maxOutput, Math.floor(window / 8)), headroom = Math.min(65536, Math.floor(window / 8));
-  return { window, output, headroom, threshold: Math.floor(Math.min(window * .8, window - output - headroom)), retain: Math.floor((window - output) * .16) };
+  return { window, output, headroom, threshold: Math.floor(Math.min(window * .5, window - output - headroom)), retain: Math.floor((window - output) * .16) };
 }
 /** Conservative UTF-8 upper estimate, including tool schemas and protocol overhead. Never label this exact. */
 export function estimateTokens(messages: Message[], tools: ToolSchema[]) {

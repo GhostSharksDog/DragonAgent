@@ -1,4 +1,5 @@
 import { IllustrationManager } from './illustration/manager';
+import { appendFileSync } from 'node:fs';
 import type { IllustrationAction } from '../shared/illustration';
 import { siteIcon } from './favicon';
 import { civitaiNetwork } from './workshop/network';
@@ -6,6 +7,7 @@ import { app, BrowserWindow, ipcMain, protocol, net, shell, dialog, Menu, Tray, 
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { initWallpaper, resolveWallpaper } from './wallpaper';
 import { Store, importLegacy } from './store';
 import { Secrets } from './secrets';
 import { Runtime } from './runtime';
@@ -16,10 +18,11 @@ import { WorkshopManager } from './workshop/manager';
 import { copyFile, readFile } from 'node:fs/promises';
 import type { WorkshopAction } from '../shared/workshop';
 
-protocol.registerSchemesAsPrivileged(['pet-skin', 'workshop', 'artifact', 'site-icon', 'illustration'].map(scheme => ({ scheme, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, ...(scheme === 'pet-skin' ? { stream: true } : {}) } })));
+protocol.registerSchemesAsPrivileged(['pet-skin', 'workshop', 'artifact', 'site-icon', 'illustration', 'wallpaper'].map(scheme => ({ scheme, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, ...(scheme === 'pet-skin' ? { stream: true } : {}) } })));
 if (process.env.DRAGON_DATA_DIR) app.setPath('userData', path.resolve(process.env.DRAGON_DATA_DIR));
 else app.setPath('userData', path.join(app.getPath('appData'), 'DragonAgent'));
 let runtime: Runtime, workbench: BrowserWindow, pet: BrowserWindow, bubble: BrowserWindow, tray: Tray;
+let petDragging = false, pendingPet: { x: number; y: number } | null = null, petDragTimer: NodeJS.Timeout | undefined;
 let workshop: WorkshopManager;
 let illustration: IllustrationManager;
 let quitting = false;
@@ -27,10 +30,12 @@ const windows = new Set<BrowserWindow>();
 const root = path.resolve(__dirname, '..');
 const branding = path.join(root, 'assets/branding');
 async function open(url: string) { const value = new URL(url); if (!['https:', 'http:'].includes(value.protocol)) throw new Error('只允许打开网页链接。'); await shell.openExternal(value.href); }
+// 桌宠窗口按 skin.content 的比例贴合角色本体，透明留白不再计入点击区域。
+const PET_WIDTH = 112, PET_HEIGHT = 130;
 function createWindow(kind: 'workbench' | 'pet' | 'bubble') {
   const transparent = kind !== 'workbench';
   const theme = runtime.view.resolvedTheme, colors = theme === 'dark' ? { background: '#1e1b25', symbol: '#e4ddef' } : { background: '#f6f7f9', symbol: '#20242e' };
-  const win = new BrowserWindow({ ...(transparent ? {} : { titleBarStyle: 'hidden' as const, titleBarOverlay: { color: colors.background, symbolColor: colors.symbol, height: 36 } }), icon: path.join(branding, 'dragon.ico'), width: kind === 'workbench' ? 1260 : kind === 'pet' ? 272 : 390, height: kind === 'workbench' ? 850 : kind === 'pet' ? 296 : 460, minWidth: kind === 'workbench' ? 850 : undefined, minHeight: kind === 'workbench' ? 600 : undefined, title: 'DragonAgent', show: false, frame: !transparent, transparent, backgroundColor: transparent ? '#00000000' : colors.background, resizable: !transparent, hasShadow: !transparent, skipTaskbar: transparent, alwaysOnTop: transparent, autoHideMenuBar: true, webPreferences: { preload: path.join(root, 'main/preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true } });
+  const win = new BrowserWindow({ ...(transparent ? {} : { titleBarStyle: 'hidden' as const, titleBarOverlay: { color: colors.background, symbolColor: colors.symbol, height: 36 } }), icon: path.join(branding, 'dragon.ico'), width: kind === 'workbench' ? 1260 : kind === 'pet' ? PET_WIDTH : 390, height: kind === 'workbench' ? 850 : kind === 'pet' ? PET_HEIGHT : 460, minWidth: kind === 'workbench' ? 850 : undefined, minHeight: kind === 'workbench' ? 600 : undefined, title: 'DragonAgent', show: false, frame: !transparent, transparent, backgroundColor: transparent ? '#00000000' : colors.background, resizable: !transparent, hasShadow: !transparent, skipTaskbar: transparent, alwaysOnTop: transparent, autoHideMenuBar: true, webPreferences: { preload: path.join(root, 'main/preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true } });
   windows.add(win); win.on('closed', () => windows.delete(win));
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
@@ -53,17 +58,22 @@ function syncWorkshop() {
 function moveBubble() {
   if (!pet || pet.isDestroyed() || !bubble || bubble.isDestroyed() || quitting) return;
   const r = pet.getBounds(), area = screen.getDisplayMatching(r).workArea;
-  const b = bubble.getBounds(); const left = r.x - b.width - 12 >= area.x;
-  bubble.setPosition(Math.round(left ? r.x - b.width - 12 : Math.min(area.x + area.width - b.width, r.x + r.width + 12)), Math.round(Math.max(area.y, Math.min(area.y + area.height - b.height, r.y + r.height - b.height))));
+  const b = bubble.getBounds();
+  // 气泡挂在鱼头正上方，底部尖角落在头顶；上方放不下时退到脚下。
+  const centered = Math.round(r.x + r.width / 2 - b.width / 2);
+  const x = Math.max(area.x + 6, Math.min(area.x + area.width - b.width - 6, centered));
+  const above = Math.round(r.y - b.height + 22);
+  const y = above >= area.y + 6 ? above : Math.round(Math.min(area.y + area.height - b.height - 6, r.y + r.height - 8));
+  bubble.setPosition(x, y);
 }
 function syncWindows() {
   if (!pet || pet.isDestroyed() || !bubble || bubble.isDestroyed() || quitting) return;
   const config = runtime.state.settings.pet;
-  const size = Math.round(272 * config.scale), height = Math.round(296 * config.scale);
+  const size = Math.round(PET_WIDTH * config.scale), height = Math.round(PET_HEIGHT * config.scale);
   if (pet.getBounds().width !== size) pet.setSize(size, height);
   pet.setAlwaysOnTop(config.alwaysOnTop, 'floating'); bubble.setAlwaysOnTop(config.alwaysOnTop, 'floating');
   if (config.visible) pet.showInactive(); else pet.hide();
-  const quota = runtime.view.petView === 'quota', wantWidth = quota ? 390 : 360, wantHeight = quota ? 460 : 100;
+  const quota = runtime.view.petView === 'quota', wantWidth = quota ? 340 : 300, wantHeight = quota ? 420 : 100;
   if (bubble.getBounds().height !== wantHeight || bubble.getBounds().width !== wantWidth) {
     // Windows locks min/max bounds on non-resizable windows; unlock only for this programmatic resize.
     bubble.setResizable(true); bubble.setSize(wantWidth, wantHeight); bubble.setResizable(false);
@@ -73,6 +83,7 @@ function syncWindows() {
 }
 function prepareWorkbench() {
   const win = createWindow('workbench');
+  win.on('focus', () => win.flashFrame(false));
   win.on('close', event => { if (!quitting) { event.preventDefault(); win.hide(); } });
   win.once('ready-to-show', () => { if (!quitting && !win.isDestroyed()) { win.show(); win.focus(); } });
   return win;
@@ -83,7 +94,7 @@ function showWorkbench() {
   workbench.show(); if (workbench.isMinimized()) workbench.restore(); workbench.focus();
 }
 function togglePet() { runtime.state.settings.pet.visible = !runtime.state.settings.pet.visible; runtime.changed(); syncWindows(); }
-function menu() { Menu.buildFromTemplate([{ label: '打开 DragonAgent', click: showWorkbench }, { label: runtime.state.settings.pet.visible ? '收起龙娘' : '召唤龙娘', click: togglePet }, { type: 'separator' }, { label: '退出', click: () => app.quit() }]).popup(); }
+function menu() { Menu.buildFromTemplate([{ label: '打开 DragonAgent', click: showWorkbench }, { label: '说点什么…', click: () => { runtime.view.petView = 'compose'; runtime.changed(false); syncWindows(); bubble.show(); bubble.focus(); } }, { label: runtime.state.settings.pet.visible ? '收起龙娘' : '召唤龙娘', click: togglePet }, { type: 'separator' }, { label: '退出', click: () => app.quit() }]).popup(); }
 async function action(value: Action) {
   if (!value || typeof value !== 'object' || typeof value.type !== 'string') throw new Error('无效操作。');
   if(value.type==='window.exit'){app.quit();return;}
@@ -130,7 +141,13 @@ async function action(value: Action) {
       if (!Number.isFinite(value.dx) || !Number.isFinite(value.dy)) return;
       const b = pet.getBounds(), area = screen.getDisplayMatching(b).workArea;
       const x = Math.round(Math.max(area.x, Math.min(area.x + area.width - b.width, b.x + value.dx))), y = Math.round(Math.max(area.y, Math.min(area.y + area.height - b.height, b.y + value.dy)));
-      pet.setPosition(x, y); runtime.state.settings.pet.x = x; runtime.state.settings.pet.y = y; moveBubble(); runtime.changed(); return;
+      // 拖动中只挪窗口；落盘和全量广播等停手后一次性做，否则每帧一次快照会卡。
+      pet.setPosition(x, y);
+      petDragging = true;
+      pendingPet = { x, y };
+      if (petDragTimer) clearTimeout(petDragTimer);
+      petDragTimer = setTimeout(() => { petDragTimer = undefined; petDragging = false; if (!pendingPet) return; runtime.state.settings.pet.x = pendingPet.x; runtime.state.settings.pet.y = pendingPet.y; moveBubble(); runtime.changed(); }, 160);
+      return;
     }
     case 'session.workspace': {
       const s = runtime.session(value.id); if (isBusy(s) || s.nativeId) throw new Error('已开始的会话固定工作目录，请创建新会话选择其他目录。');
@@ -156,15 +173,17 @@ else {
     const home = app.getPath('userData');
     const store = new Store(home);
     runtime = new Runtime(store, new Secrets(store), { home, version: app.getVersion(), workerPath: path.join(root, 'main/agent-worker.cjs'), open });
+    initWallpaper(home);
+    runtime.chooseWallpaperFile = async () => { const picked = await dialog.showOpenDialog({ title: '选择壁纸', properties: ['openFile'], filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] }); return picked.canceled ? undefined : picked.filePaths[0]; };
     await runtime.cleanDeletedSessions().catch(() => console.warn('已删除对话的缓存清理尚未完成，将在下次启动重试。'));
     syncTheme();
     nativeTheme.on('updated', () => { syncTheme(); runtime.changed(false); });
     if (!runtime.state.settings.codexPath && app.isPackaged) runtime.state.settings.codexPath = path.join(root, 'runtime/codex/bin/codex.exe');
     let skins = path.join(root, 'assets/skins/blue-fish');
-    try { await loadSkin(path.join(skins, 'skin.json')); } catch { skins = path.join(root, 'assets/skins/silver-dragon-frames'); }
+    try { await loadSkin(path.join(skins, 'skin.json')); } catch (error) { try { appendFileSync(path.join(home, 'diag-pet.log'), `blue-fish 加载失败：${(error as Error)?.stack ?? String(error)}\n`); } catch { /* 忽略 */ } skins = path.join(root, 'assets/skins/silver-dragon-frames'); }
     runtime.view.skin = await loadSkin(path.join(skins, 'skin.json'));
     const civitaiFetch=civitaiNetwork(()=>runtime.secrets.get('workshop:civitai'));
-    workshop = new WorkshopManager({ home, fetch: civitaiFetch, workerPath: path.join(root, 'main/workshop-worker.cjs'), bundledSkin: path.join(root, 'assets/skins/silver-dragon-frames/skin.json'),
+    workshop = new WorkshopManager({ home, fetch: civitaiFetch, workerPath: path.join(root, 'main/workshop-worker.cjs'), bundledSkin: path.join(root, 'assets/skins/blue-fish/skin.json'),
       changed: () => syncWorkshop(),
       skin: skin => { runtime.view.skin = skin; runtime.view.animationStartedAt = Date.now(); },
       preferences: () => runtime.state.settings.assistant, profiles: () => runtime.state.settings.profiles, key: id => runtime.secrets.get(id),
@@ -175,6 +194,7 @@ else {
     runtime.view.illustration=illustration.state;
     runtime.illustration={list:()=>illustration.state.projects.map(p=>({id:p.id,name:p.name,status:p.status})),create:async(description,commandId)=>{const id=await illustration.action({type:'illustration.create',description,commandId});runtime.view.workbenchPage='illustration';runtime.view.workbenchPageRevision=(runtime.view.workbenchPageRevision??0)+1;runtime.changed(false);showWorkbench();return {id,status:'project-created',message:'已创建插画项目，尚未生成图片'};}};
     protocol.handle('illustration',async request=>{try{const u=new URL(request.url);if(u.hostname!=='asset')throw Error('无效素材');return await net.fetch(pathToFileURL(await illustration.asset(decodeURIComponent(u.pathname.slice(1)))).href);}catch{return new Response('素材不可用',{status:404});}});
+    protocol.handle('wallpaper',async request=>{try{const u=new URL(request.url);if(u.hostname!=='bg')throw Error('无效壁纸');return await net.fetch(pathToFileURL(resolveWallpaper(u.pathname.slice(1))).href);}catch{return new Response('壁纸不可用',{status:404});}});
     protocol.handle('site-icon',async request=>{const u=new URL(request.url);if(u.hostname!=='icon')return new Response('',{status:404});const image=await siteIcon(decodeURIComponent(u.pathname.slice(1)));return image?new Response(new Uint8Array(image),{headers:{'Content-Type':'image/png','Cache-Control':'max-age=300'}}):new Response('',{status:404});});
     protocol.handle('workshop', async request => {
       try { const u = new URL(request.url); return await net.fetch(pathToFileURL(await workshop.asset(u.hostname, u.pathname)).href); }
@@ -198,14 +218,43 @@ else {
       return net.fetch(pathToFileURL(target).href);
     });
     workbench = prepareWorkbench(); pet = createWindow('pet'); bubble = createWindow('bubble');
+    // 临时诊断：把桌宠窗口的控制台与加载失败写进文件，方便定位“显示成蛋”的原因。
+    const diagPath = path.join(home, 'diag-pet.log');
+    const diag = (line: string) => { try { appendFileSync(diagPath, `${new Date().toISOString()} ${line}\n`); } catch { /* 诊断失败不影响运行 */ } };
+    diag(`skin=${runtime.view.skin?.manifest?.name ?? 'null'} base=${runtime.view.skin?.baseUrl ?? '-'} videos=${Object.keys(runtime.view.skin?.manifest?.videos ?? {}).join(',')}`);
+    for (const [label, target] of [['pet', pet], ['workbench', workbench], ['bubble', bubble]] as const) {
+      target.webContents.on('console-message', (event: any, ...rest: any[]) => diag(`[${label}] console: ${event?.message ?? rest[1] ?? rest[0]}`));
+      target.webContents.on('did-fail-load', (_e: any, code: any, desc: any, url: any) => diag(`[${label}] fail-load ${code} ${desc} ${url}`));
+      target.webContents.on('render-process-gone', (_e: any, details: any) => diag(`[${label}] renderer-gone ${JSON.stringify(details)}`));
+    }
     const area = screen.getPrimaryDisplay().workArea, config = runtime.state.settings.pet;
-    pet.setPosition(Math.round(Math.max(area.x, Math.min(config.x ?? area.x + area.width - 300, area.x + area.width - 272))), Math.round(Math.max(area.y, Math.min(config.y ?? area.y + area.height - 320, area.y + area.height - 296))));
-    pet.on('move', moveBubble);
+    pet.setPosition(Math.round(Math.max(area.x, Math.min(config.x ?? area.x + area.width - PET_WIDTH - 28, area.x + area.width - PET_WIDTH))), Math.round(Math.max(area.y, Math.min(config.y ?? area.y + area.height - PET_HEIGHT - 24, area.y + area.height - PET_HEIGHT))));
+    pet.on('move', () => { if (!petDragging) moveBubble(); });
     pet.once('ready-to-show', syncWindows);
+    // 鼠标在窗口左右哪边，鱼就转过去看哪边；方向变了才发一次，避免无谓 IPC。
+    let gaze: 'left' | 'right' | 'center' = 'center';
+    const gazeTimer = setInterval(() => {
+      if (!pet || pet.isDestroyed() || !pet.isVisible()) return;
+      const cursor = screen.getCursorScreenPoint(), bounds = pet.getBounds();
+      const dx = cursor.x - (bounds.x + bounds.width / 2);
+      const next = Math.abs(dx) < 48 ? 'center' : dx < 0 ? 'left' : 'right';
+      if (next === gaze) return;
+      gaze = next;
+      pet.webContents.send('pet:gaze', next);
+    }, 250);
+    app.on('before-quit', () => clearInterval(gazeTimer));
     const icon = nativeImage.createFromPath(path.join(branding, 'dragon-avatar.png')).resize({ width: 32, height: 32 });
     tray = new Tray(icon); tray.setToolTip('DragonAgent · 龙娘工作台'); tray.on('click', showWorkbench); tray.on('right-click', menu);
     globalShortcut.register(config.shortcut, togglePet);
-    runtime.on('change', () => { syncTheme(); const state = runtime.snapshot(); for (const win of windows) if (!win.isDestroyed()) win.webContents.send('dragon:state', state); });
+    runtime.on('task-done', () => {
+  // 后台跑完才提醒；用户正盯着工作台就别打扰。
+  const target = workbench && !workbench.isDestroyed() ? workbench : undefined;
+  if (target?.isFocused()) return;
+  shell.beep();
+  target?.flashFrame(true);
+  setTimeout(() => { if (target && !target.isDestroyed()) target.flashFrame(false); }, 4000);
+});
+runtime.on('change', () => { syncTheme(); const state = runtime.snapshot(); for (const win of windows) if (!win.isDestroyed()) win.webContents.send('dragon:state', state); });
     const valid = (sender: Electron.WebContents) => [...windows].some(w => w.webContents === sender);
     ipcMain.handle('dragon:snapshot', event => { if (!valid(event.sender)) throw new Error('未知窗口。'); return runtime.snapshot(); });
     ipcMain.handle('dragon:action', (event, value: Action) => { if (!valid(event.sender)) throw new Error('未知窗口。'); return action(value); });

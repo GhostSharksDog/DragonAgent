@@ -85,3 +85,24 @@
 .app-shell.left-collapsed{grid-template-columns:64px minmax(0,1fr)}
 .app-shell .sidebar{min-height:0;overflow-y:auto;overflow-x:hidden}
 @media(max-width:700px){.topbar{padding-left:12px;gap:4px}.topbar .summon{font-size:0;gap:0;padding:8px;min-width:32px}.topbar .summon kbd{display:none}.topbar>div{gap:6px}.topbar strong{font-size:12px}}
+
+/* 逐题提问：选项纵向排列，点选后推进到下一题。 */
+.question-flow{display:flex;flex-direction:column;gap:10px;margin:12px 0}.question-progress{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px}.question-progress-bar{flex:1;height:3px;border-radius:2px;background:var(--line);overflow:hidden}.question-progress-bar i{display:block;height:100%;background:var(--accent);transition:width .2s ease}.question-step{display:flex;flex-direction:column;gap:10px}.question-title{margin:0;font-size:14px;font-weight:600;overflow-wrap:anywhere}.question-options{display:flex;flex-direction:column;gap:8px}.question-option{display:block;width:100%;padding:10px 12px;text-align:left;border:1px solid var(--line);border-radius:10px;background:var(--panel);cursor:pointer;transition:border-color .12s ease,background .12s ease}.question-option:hover:not(:disabled){border-color:var(--accent)}.question-option:disabled{opacity:.6;cursor:default}.question-other{color:var(--muted)}.question-custom{display:flex;gap:8px}.question-custom input{flex:1}.question-back{align-self:flex-start;padding:2px 0;border:none;background:none;color:var(--muted);cursor:pointer}
+
+/* 配色方案：只覆盖主色与浅底，边框保持中性。 */
+:root[data-accent=violet]{--purple:#7250a4;--soft:#f0ebf8}
+:root[data-accent=teal]{--purple:#2f7d72;--soft:#e3f1ee}
+:root[data-accent=amber]{--purple:#a2661f;--soft:#f7ecdd}
+:root[data-accent=ink]{--purple:#3f5a8a;--soft:#e7edf7}
+:root[data-theme=dark][data-accent=violet]{--purple:#b79cde;--soft:#332c47}
+:root[data-theme=dark][data-accent=teal]{--purple:#7fcbbf;--soft:#22352f}
+:root[data-theme=dark][data-accent=amber]{--purple:#e0b06a;--soft:#3a2f22}
+:root[data-theme=dark][data-accent=ink]{--purple:#9db6e2;--soft:#252c3d}
+.accent-picker{display:flex;gap:9px;align-items:center}
+.accent-swatch{width:24px;height:24px;padding:0;border-radius:50%;border:none;cursor:pointer;transition:transform .12s ease,box-shadow .12s ease;box-shadow:inset 0 0 0 2px var(--panel),0 0 0 1px var(--line)}
+.accent-swatch.violet{background:#7250a4}
+.accent-swatch.teal{background:#2f7d72}
+.accent-swatch.amber{background:#a2661f}
+.accent-swatch.ink{background:#3f5a8a}
+.accent-swatch:hover{transform:scale(1.12)}
+.accent-swatch.active{box-shadow:inset 0 0 0 2px var(--panel),0 0 0 2px var(--text)}

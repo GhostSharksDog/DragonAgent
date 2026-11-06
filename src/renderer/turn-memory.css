@@ -1,0 +1,38 @@
+.turn-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 2px 0 22px;
+}
+.turn-divider::before {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--line) 24px);
+}
+.turn-remember {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  transition: color 120ms ease, background-color 120ms ease;
+}
+.turn-remember:hover {
+  color: var(--purple);
+  background: color-mix(in srgb, var(--purple) 8%, transparent);
+}
+.turn-remember[data-state='saving'] {
+  opacity: 0.6;
+}
+.turn-remember[data-state='saved'] {
+  color: var(--purple);
+}
+.turn-remember[data-state='error'] {
+  color: #c0554f;
+}
+.turn-remember svg {
+  opacity: 0.85;
+}

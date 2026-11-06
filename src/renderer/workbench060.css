@@ -1,7 +1,7 @@
 /* Outer app chrome and navigation surround one rounded, independently scrolling workspace. */
 :root[data-theme=light]{--shell-bg:#f6f7f9;--workspace-edge:#e8eaf0}
 :root[data-theme=dark]{--shell-bg:#1e1b25;--workspace-edge:#3b3448}
-.app-shell{display:grid;grid-template-columns:254px minmax(0,1fr);grid-template-rows:36px minmax(0,1fr);gap:0;box-sizing:border-box;padding:0 10px 10px 0;background:var(--shell-bg);height:100dvh}
+.app-shell{display:grid;grid-template-columns:254px minmax(0,1fr);grid-template-rows:36px minmax(0,1fr);column-gap:10px;box-sizing:border-box;padding:0 10px 10px 0;background:var(--shell-bg);height:100dvh}
 .app-shell.left-collapsed{grid-template-columns:64px minmax(0,1fr)}
 .app-chrome{grid-column:1 / -1;grid-row:1;display:flex;align-items:center;gap:10px;min-width:0;padding:0 150px 0 13px;color:var(--muted);font-size:12px;-webkit-app-region:drag;app-region:drag;user-select:none}
 .app-chrome button{-webkit-app-region:no-drag;app-region:no-drag;width:28px;height:28px;padding:0;font-size:17px;display:grid;place-items:center;border-radius:7px}
@@ -19,3 +19,14 @@
 .session-bar{padding-top:12px;padding-bottom:12px}
 @media(max-width:1100px){.app-shell{grid-template-columns:220px minmax(0,1fr)}.app-shell.left-collapsed{grid-template-columns:64px minmax(0,1fr)}}
 @media(max-width:700px){.app-shell{grid-template-columns:64px minmax(0,1fr);padding-right:6px;padding-bottom:6px}.app-shell>.sidebar{padding-left:8px;padding-right:8px}.app-shell .sidebar .brand>div,.app-shell .sidebar .nav-label,.app-shell .sidebar .history,.app-shell .sidebar .runtime-state,.app-shell .sidebar .nav-count{display:none}.app-shell .sidebar button{font-size:0;gap:0;padding:10px;justify-content:center}.app-shell .sidebar button svg{flex:none}.app-shell .sidebar .new-chat>span{display:none}.app-shell .brand{padding:6px 0 20px;justify-content:center}.app-shell>.main-area{border-radius:14px}.main-area>.topbar{padding:0 12px;gap:8px;height:46px;min-height:46px}.topbar .summon{font-size:0;padding:8px;gap:0;min-width:32px}.topbar .summon kbd{display:none}}
+
+/* 手动收起导航时和窄屏一致：只留图标和头像，不显示文字。 */
+.app-shell.left-collapsed .sidebar .brand>div,
+.app-shell.left-collapsed .sidebar .nav-label,
+.app-shell.left-collapsed .sidebar .history,
+.app-shell.left-collapsed .sidebar .runtime-state,
+.app-shell.left-collapsed .sidebar .nav-count{display:none}
+.app-shell.left-collapsed .sidebar button{font-size:0;gap:0;padding:10px;justify-content:center}
+.app-shell.left-collapsed .sidebar button svg{flex:none}
+.app-shell.left-collapsed .sidebar .new-chat>span{display:none}
+.app-shell.left-collapsed .brand{justify-content:center}

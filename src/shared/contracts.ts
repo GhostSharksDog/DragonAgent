@@ -42,6 +42,8 @@ export interface AppSettings {
   profiles: ModelProfile[]; selectedProfile: string; mcp: McpConfig[]; codexPath: string;
   pet: { visible: boolean; scale: number; alwaysOnTop: boolean; x?: number; y?: number; shortcut: string; chatMode?: 'simple' | 'detailed' };
   theme: 'light' | 'dark' | 'system';
+  accent: 'violet' | 'teal' | 'amber' | 'ink';
+  wallpaper?: { file: string; name: string; opacity: number; blur: number; dim: number } | null;
 }
 export interface ChatMessage { sequence?: number; id: string; commandId?: string; role: 'user' | 'assistant' | 'notice'; text: string; createdAt: number; runId?: string; partial?: boolean; attachments?: ChatAttachment[]; contextCheckpoint?: string; beforeNativeTurnId?: string; beforeNativeId?: string }
 export interface ConversationVersion { collaborationState?: AgentSession['collaborationState']; collaborationHistory?:AgentSession['collaborationHistory']; id: string; label: string; createdAt: number; messages: ChatMessage[]; tools: ToolEvent[]; tasks?: AgentTask[]; nativeId?: string; nativeTurnId?: string; checkpoint: string; status: RunStatus; error?: string; usage?: AgentSession['usage'] }
@@ -157,7 +159,10 @@ export type Action = {type:'window.exit'} | import('./illustration').Illustratio
   | { type: 'memory.save'; id?: string; text: string; tags: string[] }
   | { type: 'memory.delete'; id: string }
   | { type: 'legacy.import' }
-  | { type: 'settings.save'; theme?: AppSettings['theme']; codexPath?: string; pet?: Partial<AppSettings['pet']>; limits?: AppSettings['limits'] }
+  | { type: 'settings.save'; theme?: AppSettings['theme']; accent?: AppSettings['accent']; codexPath?: string; pet?: Partial<AppSettings['pet']>; limits?: AppSettings['limits'] }
+  | { type: 'wallpaper.choose' }
+  | { type: 'wallpaper.clear' }
+  | { type: 'wallpaper.tune'; opacity?: number; blur?: number; dim?: number }
   | { type: 'pet.toggle' }
   | { type: 'pet.view'; view: Snapshot['petView'] }
   | { type: 'pet.chatMode'; mode: 'simple' | 'detailed' }
@@ -176,6 +181,6 @@ export function contextPolicy(profile: Pick<ModelProfile, 'contextWindow' | 'max
   const window = Math.min(CONTEXT_LIMIT, profile.contextWindow);
   const output = Math.max(1, Math.min(32768, profile.maxOutput, Math.floor(window / 8)));
   const headroom = Math.min(65536, Math.floor(window / 8));
-  return { window, output, headroom, threshold: Math.floor(Math.min(window * .8, window - output - headroom)), retainRatio: .16 };
+  return { window, output, headroom, threshold: Math.floor(Math.min(window * .5, window - output - headroom)), retainRatio: .16 };
 }
 export function isBusy(session: AgentSession) { return ['running', 'waiting', 'stopping'].includes(session.status); }

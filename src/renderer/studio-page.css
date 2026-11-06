@@ -1,0 +1,10 @@
+/* 外观工坊外壳：分区切换条 + 可滚动内容区。 */
+.studio-page{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
+.studio-page-tabs{display:flex;gap:6px;flex:0 0 auto;padding:16px 36px 0}
+.studio-page-tabs button{padding:6px 14px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--muted);font-size:12.5px;cursor:pointer;transition:color .15s,border-color .15s,background .15s}
+.studio-page-tabs button:hover{color:var(--text)}
+.studio-page-tabs button.active{border-color:var(--purple);background:var(--soft);color:var(--purple)}
+.studio-page-body{display:flex;flex:1;min-height:0;overflow:hidden}
+.studio-page-body>.studio,.studio-page-body>.appearance-page{flex:1;min-height:0;overflow:auto}
+.studio-page-body>.studio{padding-top:18px}
+@media(max-width:750px){.studio-page-tabs{padding:12px 15px 0}}

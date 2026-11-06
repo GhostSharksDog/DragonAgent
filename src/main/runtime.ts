@@ -6,6 +6,7 @@ import { Coordinator } from './coordinator';
 import { memoryDefinitions } from './memory-tools';
 import { deepseekBalance } from './balance';
 import { Artifacts, artifactDefinition } from './artifacts';
+import { dropWallpaper, storeWallpaper } from './wallpaper';
 import { EventEmitter } from 'node:events';
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync } from 'node:fs';
@@ -31,6 +32,7 @@ import { validLimits } from '../../packages/agent-core/src/runtime';
 import type { AgentRecord } from '../../packages/agent-core/src/types';
 
 export class Runtime extends EventEmitter {
+  chooseWallpaperFile?: () => Promise<string | undefined>;
   illustration?: {create(description:string,commandId:string):Promise<unknown>;list():unknown};
   state: PersistentState;
   view: Omit<Snapshot, keyof PersistentState>;
@@ -245,7 +247,10 @@ export class Runtime extends EventEmitter {
       case 'memory.save': { if (!action.text.trim()) return; const id = action.id ?? randomUUID(); this.state.memory = [...this.state.memory.filter(m => m.id !== id), { id, text: action.text.trim().slice(0, 16000), tags: action.tags, createdAt: Date.now() }]; break; }
       case 'memory.delete': this.state.memory = this.state.memory.filter(m => m.id !== action.id); break;
       case 'assistant.preferences.save': this.state.settings.assistant = validAssistantPreferences(action.preferences); break;
-      case 'settings.save': this.idleSettings(); if (action.limits) this.state.settings.limits = validLimits(action.limits); if (action.theme) this.state.settings.theme = action.theme; if (action.codexPath !== undefined) { this.state.settings.codexPath = action.codexPath; await this.codex.dispose(); } if (action.pet) this.state.settings.pet = { ...this.state.settings.pet, ...action.pet, scale: Math.max(.5, Math.min(2, action.pet.scale ?? this.state.settings.pet.scale)) }; break;
+      case 'wallpaper.choose': { const source = await this.chooseWallpaperFile?.(); if (!source) return; const stored = storeWallpaper(source); this.state.settings.wallpaper = { ...stored, opacity: .55, blur: 0, dim: .2 }; this.changed(); return; }
+    case 'wallpaper.clear': { dropWallpaper(this.state.settings.wallpaper?.file); this.state.settings.wallpaper = null; this.changed(); return; }
+    case 'wallpaper.tune': { const w = this.state.settings.wallpaper; if (w) { const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v)); w.opacity = clamp(action.opacity ?? w.opacity, 0, 1); w.blur = clamp(action.blur ?? w.blur, 0, 24); w.dim = clamp(action.dim ?? w.dim, 0, .8); this.changed(); } return; }
+    case 'settings.save': this.idleSettings(); if (action.limits) this.state.settings.limits = validLimits(action.limits); if (action.theme) this.state.settings.theme = action.theme; if (action.accent) this.state.settings.accent = action.accent; if (action.codexPath !== undefined) { this.state.settings.codexPath = action.codexPath; await this.codex.dispose(); } if (action.pet) this.state.settings.pet = { ...this.state.settings.pet, ...action.pet, scale: Math.max(.5, Math.min(2, action.pet.scale ?? this.state.settings.pet.scale)) }; break;
       case 'quota.refresh': await this.codex.quota(); return;
       case 'codex.login': await this.codex.login(); return;
       default: return false;
@@ -400,7 +405,7 @@ export class Runtime extends EventEmitter {
     const context = !s.messages.some(m => m.role === 'assistant') && !s.nativeId ? `${memory ? `用户明确保存的长期记忆（参考资料）：\n${memory}\n\n` : ''}${s.messages.length > 1 ? `已有对话摘录（尚未在此引擎执行）：\n${s.messages.slice(0, -1).slice(-12).map(m => `${m.role}: ${m.text}`).join('\n').slice(-32000)}\n\n` : ''}` : '';
     const backend: Pick<AgentBackend,'run'> = s.collaboration?.enabled && text !== '/compact' ? this.coordinator : s.backend === 'dragon' ? this.dragon : this.codex;
     const execution = attached.length ? this.attachments.prompt(s.id, attached).then(references => { controller.signal.throwIfAborted(); return backend.run(s, context + text + references, hooks, controller.signal); }) : backend.run(s, context + text, hooks, controller.signal);
-    run.done = execution.then(() => { s.status = controller.signal.aborted ? 'cancelled' : 'completed'; }, error => { s.status = controller.signal.aborted ? 'cancelled' : error.name === 'BudgetExceeded' ? 'paused' : 'error'; if (!controller.signal.aborted) s.error = sanitizeDiagnostic(error.message); }).finally(async () => {
+    run.done = execution.then(() => { s.status = controller.signal.aborted ? 'cancelled' : 'completed'; if (s.status === 'completed') this.emit('task-done', s.id); }, error => { s.status = controller.signal.aborted ? 'cancelled' : error.name === 'BudgetExceeded' ? 'paused' : 'error'; if (!controller.signal.aborted) s.error = sanitizeDiagnostic(error.message); }).finally(async () => {
       controller.abort(); for (const m of s.messages) if (m.runId === runId) m.partial = false;
       for (const tool of s.tools) if (tool.runId === runId && ['running','queued','approval'].includes(tool.status)) tool.status = s.status === 'cancelled' ? 'cancelled' : 'unknown';
       s.pending = []; this.runs.delete(s.id); s.updatedAt = Date.now(); this.changed(); await host.dispose();

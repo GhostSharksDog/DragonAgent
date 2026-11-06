@@ -7,7 +7,7 @@ import type { AgentSession, AppSettings, MemoryFact } from '../shared/contracts'
 export interface PersistentState { petChat?:import('../shared/contracts').Snapshot['petChat']; settings: AppSettings; sessions: AgentSession[]; selectedSessionId: string | null; memory: MemoryFact[]; imports: string[]; pendingSessionDeletes?: string[] }
 export function initialState(): PersistentState {
   return {
-    settings: { profiles: [], selectedProfile: '', codexPath: '', theme: 'light', limits: { concurrency: 3, children: 12, requests: null },
+    settings: { profiles: [], selectedProfile: '', codexPath: '', theme: 'light', accent: 'violet', wallpaper: null, limits: { concurrency: 3, children: 12, requests: null },
       pet: { visible: false, scale: 1, alwaysOnTop: true, shortcut: 'CommandOrControl+Alt+D' },
       mcp: [{ id: 'tavily', name: 'Tavily 网页搜索', enabled: false, transport: 'streamable-http', url: 'https://mcp.tavily.com/mcp/', hasKey: false }] },
     sessions: [], selectedSessionId: null, memory: [], imports: [],

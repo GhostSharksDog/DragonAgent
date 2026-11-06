@@ -1,0 +1,117 @@
+/* 图片结果卡片：折叠时与命令块一致，展开后是缩略图，双击放大。 */
+.image-card {
+  margin: 8px 0;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.image-card-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+  user-select: none;
+}
+
+.image-card-summary::-webkit-details-marker { display: none; }
+
+.image-card-summary svg { flex: 0 0 auto; opacity: .75; }
+
+.image-card-summary svg:last-of-type { transition: transform .15s ease; }
+
+.image-card[open] > .image-card-summary svg:last-of-type { transform: rotate(180deg); }
+
+.image-card-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-card-summary small { flex: 0 0 auto; font-size: 11px; opacity: .6; }
+
+.image-card-thumb {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0 10px 10px;
+  background: none;
+  border: 0;
+  cursor: zoom-in;
+}
+
+.image-card-thumb img {
+  display: block;
+  max-width: 100%;
+  max-height: 240px;
+  margin: 0 auto;
+  border-radius: 8px;
+  object-fit: contain;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.image-card-hint {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #fff;
+  background: rgba(0, 0, 0, .55);
+  opacity: 0;
+  transition: opacity .15s ease;
+  pointer-events: none;
+}
+
+.image-card-thumb:hover .image-card-hint { opacity: 1; }
+
+.image-card-wait,
+.image-card-error { margin: 0; padding: 0 12px 10px; font-size: 12px; }
+
+.image-card-error { color: #d9534f; }
+
+.image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, .82);
+  animation: image-lightbox-in .12s ease;
+}
+
+.image-lightbox img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+  cursor: zoom-out;
+}
+
+.image-lightbox-close {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  width: 34px;
+  height: 34px;
+  font-size: 24px;
+  line-height: 1;
+  color: #fff;
+  background: rgba(255, 255, 255, .14);
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.image-lightbox-close:hover { background: rgba(255, 255, 255, .26); }
+
+@keyframes image-lightbox-in { from { opacity: 0; } to { opacity: 1; } }

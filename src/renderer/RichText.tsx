@@ -3,11 +3,12 @@ import {remarkEmphasis,copyProse} from './remark-emphasis';
 import {remarkCjkLink} from './remark-cjk-link';
 import React, { useRef, useState } from 'react';
 import Markdown, { defaultUrlTransform } from 'react-markdown';
-import type { FileArtifact } from '../shared/contracts';
+import type { Action, FileArtifact } from '../shared/contracts';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import './rich-text.css';
 import { Icon } from './Icons';
+import { ImageCard } from './ImageCard';
 
 export function CopyButton({ text, label = '复制', iconOnly=false, prose=false }: { text: string | (() => string); label?: string; iconOnly?:boolean; prose?:boolean }) {
   const [status, setStatus] = useState('');
@@ -20,12 +21,19 @@ function CodeBlock({ children }: { children?: React.ReactNode }) {
   const code = useRef<HTMLPreElement>(null);
   return <div className="code-card"><div className="code-toolbar"><span>代码</span><CopyButton label="复制代码" text={() => code.current?.textContent ?? ''}/></div><pre ref={code}>{children}</pre></div>;
 }
-export function RichText({ text, files=[], sessionId }: { text: string; files?:FileArtifact[]; sessionId?:string }) {
+export function RichText({ text, files=[], sessionId, act }: { text: string; files?:FileArtifact[]; sessionId?:string; act?:(a:Action)=>Promise<unknown> }) {
   const match=(href:string)=>{try{const normalized=decodeURIComponent(href).replace(/^file:\/\/\/?/i,'').replace(/^\/([a-z]:)/i,'$1').replace(/:\d+(?::\d+)?$/,'').replace(/\\/g,'/').toLowerCase();return files.find(f=>f.path.replace(/\\/g,'/').toLowerCase()===normalized);}catch{return undefined;}};
+  // 图片不直接铺开：先给一行可收纳的卡片，展开才取图，双击再看大图。
+  const picture=(alt:string|undefined,src:string|undefined)=>{
+    const file=typeof src==='string'?match(src):undefined;
+    if(file&&act&&sessionId)return <ImageCard name={file.name} size={file.size} load={async()=>{const result=await act({type:'artifact.preview',sessionId,artifactId:file.id}) as {url?:string}|undefined;return result?.url;}}/>;
+    if(typeof src==='string'&&/^(https?:|data:|artifact:)/i.test(src))return <ImageCard name={alt||'图片'} src={src}/>;
+    return <span className="hint">{alt?`图片：${alt}`:'图片'}</span>;
+  };
   return <div className="rich-text"><Markdown remarkPlugins={[remarkGfm,remarkCjkLink,remarkEmphasis]} rehypePlugins={[rehypeHighlight]} urlTransform={url=>match(url)?url:defaultUrlTransform(url)} components={{
     pre: CodeBlock,
     a: ({ href, children }) => {const file=match(href??'');return file&&sessionId?<button className="plain file-link" onClick={()=>void window.dragon.action({type:'artifact.preview',sessionId,artifactId:file.id})}>{children}</button>:/^https?:\/\//i.test(href ?? '') ? <WebLink href={href!}>{children}</WebLink> : <span title={href}>{children}</span>;},
-    img: ({ alt }) => <span className="hint">{alt ? `图片：${alt}` : '图片'}</span>,
+    img: ({ alt, src }) => picture(alt, typeof src==='string'?src:undefined),
     table: ({ children }) => <div className="table-scroll"><table>{children}</table></div>,
   }}>{text}</Markdown></div>;
 }

@@ -57,7 +57,7 @@ export function skinFrameLayout(manifest: Pick<SkinManifest, 'width' | 'height'>
   return { frame: cell.frame, source, crop, destination, image };
 }
 export interface SkinVideo { file: string; loop?: boolean; flipX?: boolean }
-export interface SkinManifest { name: string; width: number; height: number; anchor: { x: number; y: number }; animations: Record<string, SkinAnimation>; videos?: Record<string, SkinVideo>; rig?: import('./rig').RigDefinition }
+export interface SkinManifest { name: string; width: number; height: number; anchor: { x: number; y: number }; content?: { x: number; y: number; width: number; height: number }; animations: Record<string, SkinAnimation>; videos?: Record<string, SkinVideo>; rig?: import('./rig').RigDefinition }
 export interface SkinData { manifest: SkinManifest; baseUrl: string }
 export type BubbleMode = 'hidden' | 'quick' | 'panel';
 export type QuickView = 'chat' | 'compose' | 'quota';
@@ -113,5 +113,7 @@ export interface PetBridge {
   login(): Promise<void>;
   cancelLogin(): Promise<void>;
   openExternal(url: string): Promise<void>;
+  /** 鼠标相对桌宠的方位，用于让鱼转头看过去。 */
+  onGaze(listener: (direction: 'left' | 'right' | 'center') => void): () => void;
 }
 declare global { interface Window { pet: PetBridge } }
