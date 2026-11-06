@@ -94,4 +94,7 @@ test('builtin video skins get a real first-frame thumbnail', async () => {
   assert.ok(fish, 'blue-fish skin must be imported');
   assert.ok(fish.thumbnail?.includes('/thumbnail.png'), `video skin thumbnail missing: ${fish.thumbnail}`);
   await access(path.join(manager.root, 'skins', 'builtin-blue-fish', 'thumbnail.png'));
+  const frames = manager.state.skins.find(s => s.id === 'builtin-silver-dragon-frames')!;
+  assert.ok(frames.thumbnail?.includes('builtin-silver-dragon-frames/'), `frame skin thumbnail points at a stale id: ${frames.thumbnail}`);
+  await access(path.join(manager.root, 'skins', 'builtin-silver-dragon-frames', 'idle-atlas.png'));
 });
