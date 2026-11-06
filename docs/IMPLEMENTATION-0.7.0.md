@@ -61,20 +61,28 @@
 - 新增 `test:appearance`：亮/暗主题强调色可读性、输入栏实色、跟随系统主题、900/1100/1440px 与 150%/200% 缩放无横向溢出。
 - 原生标题栏检查恢复：测试进程清除 `ELECTRON_RUN_AS_NODE` 后验证原生命中、双击最大化消息和亮/暗标题像素；物理拖拽受 Windows 前台激活限制未自动验证。
 
+### 计划模式一次性与模型就地切换（追加修复）
+
+- 计划模式改为只对下一轮生效：手动开启用一次即消耗；本轮没有产出计划时结束即回到执行；计划已提交则保留到确认执行或“继续修改”；历史遗留的常驻 `plan` 在下一轮自动回到执行。
+- 用户提示词明确要求“先制定计划/只讨论”时，本轮自动进入计划模式（保守匹配，避免把“计划文件”等普通提及误判为计划），不影响后续轮次。
+- 模型切换不再新建聊天：新增 `session.switch`，在现有会话内切换 Codex/Dragon，保留最近 8 条消息作为下一条消息的参考摘录；切换会关闭计划/协作状态并清理旧原生线程 ID。
+- 模型菜单顶部新增“退出协作”，可在当前聊天内回到单模型；不再只能依赖协作页底部的入口。
+- 输入栏菜单与计划卡文案明确“仅下一条消息生效”。
+- 新增 `npm run test:model-switch`；`test:planning` 增加一次性计划、后续恢复执行、提示词触发计划检查。
+
 ### 验证结果
 
 - `npm run typecheck`：通过。
 - `npm run build`：通过（Vite 主包 >500 KB 警告仍在）。
-- `npm test`：**66 通过、0 失败**。
-- `npm run test:workbench`、`test:queue`、`test:ui`、`test:planning`、`test:media`、`test:composer`、`test:reasoning`、`test:context-bar`、`test:appearance`：全部通过。
+- `npm test`：**67 通过、0 失败**。
+- `npm run test:workbench`、`test:queue`、`test:ui`、`test:planning`、`test:model-switch`、`test:media`、`test:composer`、`test:reasoning`、`test:context-bar`、`test:appearance`：全部通过。
 - 真实方舟、真实 Pixiv、真实 ComfyUI 冷启动：**未执行/未验收**；固定入口替换**未执行**。
 - 源码已按核心、云端制作、外观界面、发行文档分提交并推送到 GitHub `main`；候选验收报告见 [ACCEPTANCE-0.7.0.md](ACCEPTANCE-0.7.0.md)。
 
 ## 仍未完成
 
-1. 云端桌宠 UI 状态机集中验收（模拟方舟）：预算确认与表单竞态、unknown/取消/恢复、动作版本选择、错误展示。
-2. 外观矩阵：900/1100/1440px、短窗口、100/150/200% 缩放、跟随系统主题的真实窗口检查。
-3. Pixiv 真实站点、识图、ComfyUI 冷启动与 Anima 单图验收。
-4. 安装包/便携 ZIP/SHA256/截图/版本说明，确认发行包含 fflate、媒体工具、不含密钥与测试数据。
-5. 分提交推送 GitHub；仅在任务空闲、备份完成且用户确认后替换 `release/win-unpacked`。
-6. 真实方舟付费验收需要应用内凭据和用户确认的预算，当前没有。
+1. 真实方舟付费验收：用户已尝试配置，但保存的值只有 22 字符（`api-` 前缀），方舟返回 `The API key format is incorrect`；需要重新复制完整 API Key，再跑立绘/动作视频真实链路。
+2. 真实 Pixiv 登录/检索/识图验收。
+3. 本轮计划模式与模型切换修复晚于候选包构建，**最终交付前必须重新打包并更新 SHA256**。
+4. 真实云端与界面验收通过、任务空闲、数据备份后，才替换 `release/win-unpacked`。
+5. 安装包未签名；FFmpeg GPL 分发合规仍需最终确认。

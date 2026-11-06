@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {AgentRuntime,ToolRegistry,MemorySessionStore,type AgentRecord,type Message} from '../packages/agent-core/src';
 import {appearanceValues} from '../src/shared/appearance';
-import {validatePlanSteps} from '../src/shared/planning';
+import {validatePlanSteps,wantsPlan} from '../src/shared/planning';
 const profile={id:'p',model:'fixture',protocol:'openai-completions' as const,baseUrl:'http://fixture',contextWindow:65536,maxOutput:4096};
 const reply=(message:Message)=>({message,usage:{input:20,output:5},finish:message.calls?.length?'tools' as const:'stop' as const});
 test('plan policy blocks writes and untrusted MCP reads under every permission; children inherit it',async()=>{
@@ -69,4 +69,17 @@ test('plan tool discovery never exposes unaudited MCP tools', async () => {
   assert.equal(load.isError, true);
   assert.match(load.text, /工具不存在或连接不可用/);
   await core.dispose();
+});
+
+test('explicit plan requests are detected without treating ordinary mentions as plan mode', () => {
+  assert.equal(wantsPlan('请制定计划：整理工作目录'), true);
+  assert.equal(wantsPlan('请先制定计划，再执行：整理工作目录'), true);
+  assert.equal(wantsPlan('先给出实施步骤，然后再动手'), true);
+  assert.equal(wantsPlan('只讨论方案，不要执行'), true);
+  assert.equal(wantsPlan('make a plan first'), true);
+  assert.equal(wantsPlan("don't execute anything yet"), true);
+  assert.equal(wantsPlan('这个计划文件在哪里'), false);
+  assert.equal(wantsPlan('继续执行，把结果写出来'), false);
+  assert.equal(wantsPlan('plan.md 打不开'), false);
+  assert.equal(wantsPlan('帮我整理计划目录'), false);
 });

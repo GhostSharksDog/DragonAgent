@@ -11,7 +11,7 @@ export function CollaborationPicker({session,profiles,catalog,act,close}:{sessio
   const selected=catalog.models.find(m=>m.model===model)??(!model?catalog.models.find(m=>m.isDefault):undefined);
   const save=async()=>{setSaving(true);try{
     let id=session.id;
-    if(session.backend!=='dragon'){const result=await act({type:'session.create',backend:'dragon',profileId,carryFrom:session.id});if(typeof result!=='string')return;id=result;}
+    if(session.backend!=='dragon'){const ok=await act({type:'session.switch',id,backend:'dragon',profileId});if(!ok)return;}
     const ok=await act({type:'session.collaboration',id,config:{enabled:true,plannerModel:model||undefined,effort,executionProfileId:profileId}});
     if(ok)close();
   }finally{setSaving(false);}};
@@ -22,7 +22,7 @@ export function CollaborationPicker({session,profiles,catalog,act,close}:{sessio
     {selected&&<ReasoningControl session={{...session,model:selected.model,reasoningEffort:effort}} model={selected} act={act} openModels={()=>document.querySelector<HTMLSelectElement>('[aria-label="协作规划模型"]')?.focus()} save={async(m,e)=>{setModel(m);setEffort(e);return true;}}/>}
     <label>执行模型<select aria-label="协作执行模型" value={profileId} onChange={e=>setProfile(e.target.value)}>{choices.map(p=><option key={p.id} value={p.id}>{p.name} · {p.model}</option>)}</select></label>
     {!choices.length&&<p className="catalog-error">请在设置中添加 DeepSeek 模型连接。</p>}
-    {session.backend==='codex'&&<p className="menu-footnote">将携带可审核摘录创建新聊天，默认全请求批准。</p>}
+    {session.backend==='codex'&&<p className="menu-footnote">将把当前聊天切换为 Dragon 并携带最近对话摘录，不另开聊天。</p>}
     <button className="primary" disabled={saving||!profileId} onClick={()=>void save()}>{saving?'正在保存…':'使用协作模式'}</button>
     {session.collaboration?.enabled&&<button className="menu-action" onClick={async()=>{if(await act({type:'session.collaboration',id:session.id,config:{enabled:false}}))close();}}>切回单模型</button>}
   </section>;

@@ -1,5 +1,6 @@
 import type { SkinData, QuotaSnapshot } from '../pet/shared/types';
 import type { WorkshopAction, WorkshopSnapshot } from './workshop';
+import type { CompactBubbleLayout } from './compact-bubble';
 
 export const CONTEXT_LIMIT = 524_288;
 export type BackendKind = 'dragon' | 'codex';
@@ -58,7 +59,7 @@ export interface PendingRequest {
   sessionId: string; runId: string;
 }
 export interface AgentSession {
-  mode?:'execute'|'plan'; plans?:import('./planning').PlanVersion[];
+  mode?:'execute'|'plan'; planArmed?:boolean; handoff?:string; plans?:import('./planning').PlanVersion[];
   queuedMessages?: {commandId:string;text:string;attachments?:ChatAttachment[];paused:boolean}[];
   attempts?: (import('../../packages/agent-core/src/types').RequestAttempt & {runId:string;agentId:string})[];
   collaboration?: import('./collaboration').CollaborationConfig;
@@ -98,6 +99,7 @@ export interface Snapshot {
   memory: MemoryFact[]; backends: { dragon: BackendState; codex: BackendState };
   mcp: McpStatus[]; quota: QuotaSnapshot; account: string; skin: SkinData | null;
   petView: 'hidden' | 'compose' | 'reply' | 'quota'; animationStartedAt: number; version: string;
+  compactBubbleLayout?: CompactBubbleLayout;
 }
 export interface BackendHooks {
   plan?(plan:import('./planning').DragonPlan):void;
@@ -137,6 +139,7 @@ export type Action = import('./studio').StudioAction | {type:'window.exit'} | im
   | { type: 'codex.models' }
   | { type: 'session.codexModel'; id: string; model: string; effort?: string }
   | { type: 'session.model'; id: string; profileId: string }
+  | { type: 'session.switch'; id: string; backend: 'dragon' | 'codex'; profileId?: string; model?: string; effort?: string }
   | { type: 'session.reasoning'; id: string; effort?: string }
   | { type: 'session.permissionMode'; id: string; mode: PermissionMode }
   | { type: 'session.attachDrop'; id: string; files: DroppedFile[] }

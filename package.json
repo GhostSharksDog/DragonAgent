@@ -22,6 +22,7 @@
     "test:planning": "node scripts/planning-ui-check.mjs",
     "test:media": "tsx scripts/media-check.ts",
     "test:appearance": "node scripts/appearance-check.mjs",
+    "test:model-switch": "node scripts/model-switch-check.mjs",
     "test:comfy-live": "node scripts/comfy-live-check.mjs",
     "smoke": "node scripts/smoke.mjs",
     "prepare:runtime": "tsx scripts/prepare-runtime.ts",

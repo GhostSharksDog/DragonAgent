@@ -1,5 +1,5 @@
 import {DEFAULT_APPEARANCE,appearanceValues} from '../shared/appearance';
-import { planMarkdown } from '../shared/planning';
+import { planMarkdown, wantsPlan } from '../shared/planning';
 import { illustrationDefinitions } from './illustration/tools';
 import { captureVersion, rememberVersion, applyVersion } from './versions';
 import {routeChat} from './chat-routing';
@@ -127,7 +127,7 @@ export class Runtime extends EventEmitter {
       case 'session.mode': {
         const s=this.session(action.id);
         if(!['plan','execute'].includes(action.mode)||s.backend!=='dragon'||s.collaboration?.enabled||s.readOnly||isBusy(s)||s.pending.length||this.state.petChat?.queue?.some(q=>q.sessionId===s.id))throw Error('请在普通 Dragon 聊天空闲且待发送队列为空时切换模式。');
-        s.mode=action.mode;this.changed();return true;
+        s.mode=action.mode;s.planArmed=action.mode==='plan';this.changed();return true;
       }
       case 'session.plan.execute': {
         const s=this.session(action.id),p=s.plans?.find(p=>p.id===action.versionId);
@@ -191,6 +191,25 @@ export class Runtime extends EventEmitter {
         this.state.settings.selectedProfile = profile.id; this.state.settings.selectedBackend = 'dragon';
         this.changed(); return true;
       }
+      case 'session.switch': {
+        const s=this.session(action.id);
+        if(isBusy(s)||s.readOnly||this.attaching.has(s.id)||this.configuring||s.pending.length)throw new Error('请等待当前任务、审批或附件处理结束后切换模型。');
+        if(action.backend==='codex'){
+          const model=action.model?.trim();if(!model)throw new Error('请选择 Codex 模型。');
+          s.backend='codex';s.model=model;s.reasoningEffort=action.effort;s.collaboration={enabled:false};
+          this.state.settings.selectedBackend='codex';this.state.settings.selectedCodexModel=model;this.state.settings.selectedCodexEffort=action.effort;
+        }else{
+          const profile=this.state.settings.profiles.find(p=>p.id===(action.profileId??s.profileId));if(!profile)throw new Error('模型配置不存在，请重新选择。');
+          s.backend='dragon';s.profileId=profile.id;s.model=undefined;s.reasoningEffort=action.effort;
+          if(s.collaboration?.enabled&&!/deepseek/i.test(profile.model))s.collaboration={...s.collaboration,enabled:false};
+          this.state.settings.selectedBackend='dragon';this.state.settings.selectedProfile=profile.id;
+        }
+        s.mode='execute';s.planArmed=false;s.nativeId=undefined;s.nativeTurnId=undefined;s.usage=undefined;s.error=undefined;
+        s.handoff=this.handoffText(s.messages);
+        s.messages.push({id:randomUUID(),role:'notice',text:`已切换到 ${s.backend==='codex'?`Codex · ${s.model}`:this.state.settings.profiles.find(p=>p.id===s.profileId)?.name??'Dragon'}；继续使用当前聊天，下一条消息会携带最近对话摘录。`,createdAt:Date.now(),sequence:Math.max(0,...s.messages.map(m=>m.sequence??0),...s.tools.map(t=>t.sequence??0))+1});
+        s.updatedAt=Date.now();this.changed();return true;
+      }
+
       case 'session.reasoning': {
         const s = this.session(action.id);
         if (s.backend !== 'dragon') throw new Error('Codex 的推理强度请在 Codex 模型设置里选择。');
@@ -384,6 +403,9 @@ export class Runtime extends EventEmitter {
     const chat=this.state.petChat??={};chat.queue??=[];if(chat.queue.some(q=>q.commandId===commandId))return;
     chat.queue.push({sessionId:id,text,commandId,attachments:structuredClone(attachments)});this.petQueueArmed.add(commandId);this.changed();
   }
+  private handoffText(messages:AgentSession['messages']):string {
+    return messages.filter(m=>m.role!=='notice'&&m.text).slice(-8).map(m=>`${m.role==='user'?'用户':'助理'}：${m.text}`).join('\n\n').slice(-16000);
+  }
   private drainQueue(id:string){
     const s=this.session(id);if(isBusy(s))return;const q=this.state.petChat?.queue?.find(q=>q.sessionId===id);if(!q||!this.petQueueArmed.has(q.commandId))return;
     try {this.send(id,q.text,q.commandId,true,q.attachments);this.state.petChat!.queue=this.state.petChat!.queue!.filter(v=>v!==q);this.petQueueArmed.delete(q.commandId);}
@@ -408,6 +430,17 @@ export class Runtime extends EventEmitter {
     let sequence=Math.max(0,...s.messages.map(m=>m.sequence??0),...s.tools.map(t=>t.sequence??0));
     const live = () => s.runId === runId && !controller.signal.aborted;
     if(s.mode==='plan'&&s.plans?.length)s.plans.at(-1)!.stale=true;
+    // 计划模式只对下一轮生效：手动开启用一次即消耗；显式要求“先计划”时临时启用；遗留的常驻 plan 自动回到执行。
+    let planTurn=false;
+    if(s.backend!=='dragon'){s.mode='execute';s.planArmed=false;}
+    else if(!s.collaboration?.enabled){
+      const pendingQuestions=s.mode==='plan'&&(s.plans?.at(-1)?.plan.questions.length??0)>0;
+      const auto=!!text.trim()&&wantsPlan(text)&&s.mode!=='plan';
+      if(auto){s.mode='plan';s.planArmed=false;if(s.plans?.length)s.plans.at(-1)!.stale=true;}
+      planTurn=s.mode==='plan'&&(auto||s.planArmed===true||pendingQuestions);
+      if(s.mode==='plan'&&!planTurn)s.mode='execute';
+      if(planTurn)s.planArmed=false;
+    }
     const hooks: BackendHooks = {
       plan: plan=>{if(!live()||s.mode!=='plan')throw Error('计划轮次已失效');s.plans??=[];s.plans.push({id:randomUUID(),runId,createdAt:Date.now(),plan:structuredClone(plan)});this.changed();},
       text: (value, replace) => { if (!live()) return; let m = s.messages.find(v => v.id === outputId); if (!m) { m = { id: randomUUID(), role: 'assistant', text: '', createdAt: Date.now(), runId, partial: true, sequence:++sequence }; s.messages.push(m); outputId = m.id; } m.text = replace ? value : m.text + value; this.changed(); },
@@ -433,10 +466,13 @@ export class Runtime extends EventEmitter {
     const run = { controller, hooks, host, done: undefined as Promise<void> | undefined }; this.runs.set(s.id, run);
     this.view.animationStartedAt = Date.now(); this.changed();
     const memory = this.state.memory.map(m => m.text).join('\n').slice(0, 32000);
-    const context = !s.messages.some(m => m.role === 'assistant') && !s.nativeId ? `${memory ? `用户明确保存的长期记忆（参考资料）：\n${memory}\n\n` : ''}${s.messages.length > 1 ? `已有对话摘录（尚未在此引擎执行）：\n${s.messages.slice(0, -1).slice(-12).map(m => `${m.role}: ${m.text}`).join('\n').slice(-32000)}\n\n` : ''}` : '';
+    const handoff=s.handoff;if(handoff)s.handoff=undefined;
+    const context = (!s.messages.some(m => m.role === 'assistant') && !s.nativeId ? `${memory ? `用户明确保存的长期记忆（参考资料）：\n${memory}\n\n` : ''}${s.messages.length > 1 ? `已有对话摘录（尚未在此引擎执行）：\n${s.messages.slice(0, -1).slice(-12).map(m => `${m.role}: ${m.text}`).join('\n').slice(-32000)}\n\n` : ''}` : '') + (handoff ? `切换模型前的会话摘录（仅参考，不继承权限）：\n${handoff}\n\n` : '');
     const backend: Pick<AgentBackend,'run'> = s.collaboration?.enabled && text !== '/compact' ? this.coordinator : s.backend === 'dragon' ? this.dragon : this.codex;
     const execution = attached.length ? this.attachments.prompt(s.id, attached).then(references => { controller.signal.throwIfAborted(); return backend.run(s, context + text + references, hooks, controller.signal); }) : backend.run(s, context + text, hooks, controller.signal);
     run.done = execution.then(() => { s.status = controller.signal.aborted ? 'cancelled' : 'completed'; if (s.status === 'completed') this.emit('task-done', s.id); }, error => { s.status = controller.signal.aborted ? 'cancelled' : error.name === 'BudgetExceeded' ? 'paused' : 'error'; if (!controller.signal.aborted) s.error = sanitizeDiagnostic(error.message); }).finally(async () => {
+      // 一轮计划没有产生计划（或已取消）就结束：立即恢复执行模式，避免计划状态黏到后续对话。
+      if(planTurn&&s.mode==='plan'&&!(s.plans??[]).some(p=>p.runId===runId)){s.mode='execute';s.planArmed=false;}
       controller.abort(); for (const m of s.messages) if (m.runId === runId) m.partial = false;
       for (const tool of s.tools) if (tool.runId === runId && ['running','queued','approval'].includes(tool.status)) tool.status = s.status === 'cancelled' ? 'cancelled' : 'unknown';
       s.pending = []; this.runs.delete(s.id); s.updatedAt = Date.now(); this.changed(); await host.dispose();

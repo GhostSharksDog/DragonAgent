@@ -28,10 +28,9 @@ const server = createServer(async (req, res) => {
   requests.push({ planMode, toolDone, tools: (body.tools ?? []).map(t => t.function?.name), system: String(system), lastUser: String(lastUser) });
   res.writeHead(200, { 'content-type': 'text/event-stream' });
   const send = value => res.write(`data: ${JSON.stringify(value)}\n\n`);
-  const plan = !planASent ? planA : planB;
+  const plan = lastUser.includes('再计划一次') ? planB : planA;
   if (planMode && !toolDone && (lastUser.includes('整理工作目录') || lastUser.includes('再计划一次'))) {
-    if (lastUser.includes('再计划一次')) planBSent = true; else planASent = true;
-    send({ choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: `call_plan_${requests.length}`, type: 'function', function: { name: 'plan_submit', arguments: JSON.stringify(lastUser.includes('再计划一次') ? planB : plan) } }] } }] });
+    send({ choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: `call_plan_${requests.length}`, type: 'function', function: { name: 'plan_submit', arguments: JSON.stringify(plan) } }] } }] });
     send({ choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 100, completion_tokens: 20 } });
   } else {
     const text = planMode ? '计划已提交，请确认后执行。' : '执行完成，结果已核对。';
@@ -132,6 +131,33 @@ try {
   const staleBlocked = await page.evaluate(async ({ id, versionId }) => { try { await window.dragon.action({ type: 'session.plan.execute', id, versionId, commandId: 'stale-plan' }); return ''; } catch (error) { return String(error); } }, { id, versionId: stale.id });
   assert.match(staleBlocked, /请确认最新完整计划/);
   report.checks.push('后续讨论会把计划标记为待修订并拒绝执行');
+
+  // 计划模式只对下一轮生效：提交计划后不执行，直接再发一条普通消息，必须回到执行模式。
+  const id2 = await act({ type: 'session.create', backend: 'dragon', profileId: 'plan' });
+  await act({ type: 'session.mode', id: id2, mode: 'plan' });
+  await page.locator('.composer textarea').fill('请制定计划：整理工作目录');
+  await page.keyboard.press('Enter');
+  await waitFor(async () => (await session(id2)).plans?.length === 1, '一次性计划提交');
+  await page.locator('.composer textarea').fill('继续讨论，不要再计划');
+  await page.keyboard.press('Enter');
+  await waitFor(async () => (await session(id2)).status !== 'running', '一次性计划后续结束');
+  const once = await session(id2);
+  assert.equal(once.mode, 'execute', '计划模式不应黏到下一条消息');
+  const follow = [...requests].reverse().find(r => r.lastUser.includes('继续讨论'));
+  assert(follow, '缺少后续消息请求');
+  assert.equal(follow.planMode, false, '后续消息不应再带计划系统提示');
+  assert.ok(follow.tools.includes('pet_files_write') && follow.tools.includes('pet_terminal'), '后续消息应恢复正常工具');
+  report.checks.push('计划模式仅下一条消息生效，后续消息恢复执行模式');
+
+  // 用户明确写“先制定计划再执行”时，即使未点开关，本轮也进入计划模式。
+  const id3 = await act({ type: 'session.create', backend: 'dragon', profileId: 'plan' });
+  await page.locator('.composer textarea').fill('请先制定计划，再执行：整理工作目录');
+  await page.keyboard.press('Enter');
+  await waitFor(async () => (await session(id3)).plans?.length === 1, '提示词触发的计划');
+  const prompted = [...requests].reverse().find(r => r.lastUser.includes('请先制定计划'));
+  assert(prompted, '缺少提示词触发的计划请求');
+  assert.equal(prompted.planMode, true, '明确要求计划时应自动进入计划模式');
+  report.checks.push('提示词明确要求先计划时自动进入计划模式');
 
   assert.deepEqual(errors, [], `页面异常：${errors.join('; ')}`);
   report.passed = true;
