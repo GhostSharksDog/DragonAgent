@@ -16,6 +16,7 @@
 - `npm run typecheck` / `npm run build`：通过。
 - `npm test`：66 通过、0 失败。
 - 集成脚本：`test:workbench`、`test:queue`、`test:ui`、`test:planning`、`test:media`、`test:composer`、`test:reasoning`、`test:context-bar`、`test:appearance` 全部通过。
+- 真实 ComfyUI 冷启动 + Animagine 单图：本机 Comfy Desktop 安装检测、冷启动、768×1024 生成（102 秒），输出 PNG；脚本 `npm run test:comfy-live`。
 - 安装包冒烟：`release/0.7.0/win-unpacked/DragonAgent.exe` 可启动，欢迎页视频皮肤与桌宠窗口正常，版本 0.7.0；发行包内的 ZIP 桌宠导入成功（fflate 可用）。
 - 发行包抽查：含 fflate、ffmpeg/ffprobe 与 manifest、内置桌宠素材、Codex 运行时、FFmpeg 许可材料；抽查未发现数据库、密钥或测试用户数据。
 
@@ -31,7 +32,7 @@
 ## 未完成 / 阻塞
 
 1. 真实方舟付费验收：需要在应用内填写方舟 Key、开通 Seedream/Seedance，并由用户确认预算；没有实际账单结果前不得标记通过。
-2. 真实 Pixiv 登录/检索/识图与 ComfyUI 冷启动、Anima 单图：仍需集中验收。
+2. 真实 Pixiv 登录/检索/识图：仍需集中验收。
 3. 固定入口替换与正式 Release：源码已推送 GitHub；安装包/Release 与固定入口仍未发布，需在验收完成、任务空闲并备份后执行。
 4. FFmpeg 为 GPL-3.0 独立可执行文件；发行包已附许可与源码地址，正式发布前仍需确认分发合规。
 5. 详细验收状态见 [ACCEPTANCE-0.7.0.md](ACCEPTANCE-0.7.0.md)。

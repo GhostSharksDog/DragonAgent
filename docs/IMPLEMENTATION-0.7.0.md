@@ -44,6 +44,11 @@
 - 打包后冒烟：`win-unpacked/DragonAgent.exe` 以独立数据目录启动，欢迎页视频皮肤与桌宠窗口正常，版本 0.7.0；从 ZIP 导入桌宠成功（验证 fflate 在发行包内可用）；打包版桌宠库中两套内置素材缩略图均能加载（逐帧 atlas 1632×，视频首帧 272×），验证发行包内 FFmpeg 路径。
 - **未替换固定入口 `release\win-unpacked`，未发布。**
 
+### 插画真实生成
+
+- 真实 ComfyUI 冷启动验收：自动检测本机 Comfy Desktop 安装（`standalone-env` 之外的 `.venv`），启动 ComfyUI，使用 Animagine XL 4.0 Opt 生成 768×1024 单图，102 秒完成；生成文件统一转码为 PNG 保存（此前 ComfyUI 返回 JPEG 却以 `.png` 落盘）。
+- 新增 `scripts/comfy-live-check.mjs`（`npm run test:comfy-live`）：需要本机 ComfyUI + GPU，不属于常规 `npm test`；运行结束只停止自己启动的 ComfyUI。
+
 ### 外观与输入
 
 - 自定义强调色按亮/暗主题收敛到可读亮度范围，避免白底白字/深底暗字；自定义色仍保留色相。
