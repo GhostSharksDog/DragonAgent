@@ -1,3 +1,4 @@
+import { PLAN_PROMPT } from '../shared/planning';
 import { randomUUID } from 'node:crypto';
 import type { AgentBackend, AgentSession, AppSettings, BackendHooks, BackendState, McpStatus, AgentTask } from '../shared/contracts';
 import type { AgentEvent, AgentRecord, Grant } from '../../packages/agent-core/src';
@@ -10,7 +11,7 @@ export interface ToolBridge {
   callTool(session: AgentSession, name: string, args: unknown, callId: string): Promise<ToolOutput>;
   unbindTools(session: AgentSession): Promise<void>; cancel(session: AgentSession, agentId?: string): Promise<void>;
 }
-export function sessionGrant(s: AgentSession): Grant { const mode = s.permissionMode ?? 'ask'; return { folders: s.workspace ? [s.workspace] : mode === 'full' ? [os.homedir()] : [], origins: s.origins, browserInput: mode !== 'ask' || s.browserInput, terminal: mode !== 'ask' || s.terminalEnabled, approvalMode: mode, allFolders: mode === 'full', allOrigins: mode === 'full' }; }
+export function sessionGrant(s: AgentSession): Grant { const mode = s.permissionMode ?? 'ask'; return { mode:s.mode??'execute', folders: s.workspace ? [s.workspace] : mode === 'full' ? [os.homedir()] : [], origins: s.origins, browserInput: mode !== 'ask' || s.browserInput, terminal: mode !== 'ask' || s.terminalEnabled, approvalMode: mode, allFolders: mode === 'full', allOrigins: mode === 'full' }; }
 export class DragonBackend implements AgentBackend, ToolBridge {
   private worker: import('electron').UtilityProcess | null = null;
   private starting: Promise<void> | null = null;
@@ -59,7 +60,8 @@ export class DragonBackend implements AgentBackend, ToolBridge {
         if (!b || b.signal.aborted || b.session.runId !== message.agent.runId) throw new Error('任务已停止或过期。');
         const signal = AbortSignal.any([controller.signal, b.signal]), prefix = message.agent.parentId ? `子任务「${message.agent.title}」· ` : '';
         let result: unknown;
-        if (message.kind === 'tool') result = await this.options.tool(message.agent, message.params.name, message.params.arguments, signal);
+        if (message.kind === 'plan') { if(b.session.mode!=='plan'||message.agent.parentId||!b.hooks.plan)throw Error('计划提交不属于当前模式'); b.hooks.plan(message.params); result=true; }
+        else if (message.kind === 'tool') result = await this.options.tool(message.agent, message.params.name, message.params.arguments, signal);
         else if (message.kind === 'question') result = await b.hooks.request({ id: message.request, kind: 'question', title: `${prefix}需要你的回答`, details: '', questions: message.params.questions }, signal);
         else result = await b.hooks.request({ id: message.request, kind: 'approval', source:{agentId:message.agent.id,title:message.agent.parentId?message.agent.title:'主任务'}, toolId: message.params.callId ? message.agent.title==='Codex 工具通道'?message.params.callId:`${message.agent.id}:${message.params.callId}` : undefined, title: prefix + message.params.title, details: message.params.details }, signal);
         signal.throwIfAborted(); this.worker?.postMessage({ reply: message.request, result });
@@ -83,7 +85,7 @@ export class DragonBackend implements AgentBackend, ToolBridge {
     const cancel = () => { void this.cancel(session).catch(() => undefined); }; signal.addEventListener('abort', cancel, { once: true });
     try {
       const effort = ['none','low','high','max'].includes(session.reasoningEffort ?? '') ? session.reasoningEffort : undefined;
-      const result = await this.rpc('run', { sessionId: session.id, runId: session.runId, profileId: session.profileId, prompt, goal:session.collaborationState?.stage==='executing'?session.collaborationState.plan?.goal:undefined, steps:session.collaborationState?.stage==='executing'?session.collaborationState.plan?.steps.map(step=>({id:step.id,title:step.title,dependsOn:step.dependsOn,status:'pending',evidenceRefs:[],checks:step.checks.map(description=>({kind:'manual',description}))})):undefined, system: assistantPrompt(this.options.settings().assistant) + `\n当前权限等级：${session.permissionMode ?? 'ask'}。auto 自动批准已授权范围内的操作，full 允许其他目录和网站。`, grant: sessionGrant(session), limits: limits ?? this.options.settings().limits, compact: prompt === '/compact', reasoningEffort: effort }, 0);
+      const result = await this.rpc('run', { sessionId: session.id, runId: session.runId, profileId: session.profileId, prompt, goal:session.plans?.find(p=>p.execution?.runId===session.runId)?.plan.goal??(session.collaborationState?.stage==='executing'?session.collaborationState.plan?.goal:undefined), steps:session.plans?.find(p=>p.execution?.runId===session.runId)?.plan.steps.map(step=>({id:step.id,title:step.title,dependsOn:step.dependsOn,status:'pending',evidenceRefs:[],checks:step.checks.map(description=>({kind:'manual',description}))}))??(session.collaborationState?.stage==='executing'?session.collaborationState.plan?.steps.map(step=>({id:step.id,title:step.title,dependsOn:step.dependsOn,status:'pending',evidenceRefs:[],checks:step.checks.map(description=>({kind:'manual',description}))})):undefined), system: assistantPrompt(this.options.settings().assistant) + (session.mode==='plan'?'\n'+PLAN_PROMPT:'\n当前为执行模式；先前计划模式的限制已结束，按照用户确认的计划及当前权限执行。') + `\n当前权限等级：${session.permissionMode ?? 'ask'}。auto 自动批准已授权范围内的操作，full 允许其他目录和网站。`, grant: sessionGrant(session), limits: limits ?? this.options.settings().limits, compact: prompt === '/compact', reasoningEffort: effort }, 0);
       if (result.status === 'paused') { const error = new Error(result.error ?? '达到调用预算'); error.name = 'BudgetExceeded'; throw error; }
       if (result.status === 'error') throw new Error(result.error ?? 'Agent 执行失败。');
     } finally { signal.removeEventListener('abort', cancel); this.bindings.delete(session.id); }

@@ -28,10 +28,12 @@ export class ToolRegistry {
     return () => { if (this.tools.get(definition.name)?.definition === definition) this.tools.delete(definition.name); };
   }
   canParallel(name:string) { const d=this.tools.get(name)?.definition;return d?.effect==='read'&&d.parallelSafe===true; }
+  allowed(name:string, agent:ToolContext['agent']) { return agent.grant?.mode!=='plan' || this.tools.get(name)?.definition.planSafe===true; }
   schemas(): ToolSchema[] { return [...this.tools.values()].map(({ definition: d }) => ({ name: d.name, description: d.description, parameters: d.parameters })); }
   async call(name: string, args: unknown, context: ToolContext): Promise<ToolResult> {
     context.signal.throwIfAborted(); const item = this.tools.get(name);
     if (!item) return { isError: true, errorKind: 'validation', text: `工具不存在：${name}` };
+    if (!this.allowed(name,context.agent)) return {isError:true,errorKind:'denied',text:'计划模式仅允许宿主验证过的只读工具。'};
     if (!item.validate(args)) return { isError: true, errorKind: 'validation', text: `工具参数无效：${this.ajv.errorsText(item.validate.errors)}` };
     const execute = async (): Promise<ToolResult> => {
       context.signal.throwIfAborted();
@@ -51,3 +53,4 @@ export class ToolRegistry {
     catch (error) { if (context.signal.aborted || error instanceof BudgetExceeded) throw error; return { isError: true, errorKind: ['write','unknown'].includes(item.definition.effect) ? 'unknown' : (error as Error).name === 'TimeoutError' ? 'timeout' : 'service', text: (error as Error).message }; }
   }
 }
+

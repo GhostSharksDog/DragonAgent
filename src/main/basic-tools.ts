@@ -12,12 +12,12 @@ async function allowedPath(value:unknown,ctx:ToolContext) {
   ctx.signal.throwIfAborted();return target;
 }
 export function registerBasicTools(registry:ToolRegistry) {
-  registry.register({name:'local_time',description:'读取当前时间或将 ISO 时间转换到 IANA 时区，例如 Asia/Shanghai。',effect:'read',parameters:{type:'object',properties:{timezone:string,instant:string},additionalProperties:false},execute:async args=>{
+  registry.register({name:'local_time',description:'读取当前时间或将 ISO 时间转换到 IANA 时区，例如 Asia/Shanghai。',effect:'read',planSafe:true,parameters:{type:'object',properties:{timezone:string,instant:string},additionalProperties:false},execute:async args=>{
     const now=args.instant?new Date(String(args.instant)):new Date();if(!Number.isFinite(now.getTime()))throw Error('时间格式无效，请使用带时区的 ISO 时间。');
     const timezone=String(args.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone);
     return {text:JSON.stringify({utc:now.toISOString(),timezone,local:new Intl.DateTimeFormat('zh-CN',{timeZone:timezone,dateStyle:'full',timeStyle:'long'}).format(now)})};
   }});
-  registry.register({name:'local_git_read',description:'只读查看本地 Git 仓库状态、最近提交、差异或分支。依赖系统 Git；不执行仓库脚本、外部 diff 或写操作。',effect:'read',parameters:{type:'object',properties:{directory:string,operation:{enum:['status','log','diff','branches']}},required:['directory','operation'],additionalProperties:false},execute:async(args,ctx)=>{
+  registry.register({name:'local_git_read',description:'只读查看本地 Git 仓库状态、最近提交、差异或分支。依赖系统 Git；不执行仓库脚本、外部 diff 或写操作。',effect:'read',planSafe:true,parameters:{type:'object',properties:{directory:string,operation:{enum:['status','log','diff','branches']}},required:['directory','operation'],additionalProperties:false},execute:async(args,ctx)=>{
     const cwd=await allowedPath(args.directory,ctx);if(!(await stat(cwd)).isDirectory())throw Error('请提供仓库目录。');
     const commands:Record<string,string[]>={status:['status','--short','--branch','--untracked-files=normal'],log:['log','-30','--format=%h %ad %s','--date=iso-strict'],diff:['diff','--no-ext-diff','--no-textconv','--stat','--patch','--'],branches:['branch','--list','--format=%(refname:short) %(objectname:short)']};
     return new Promise((resolve,reject)=>{
@@ -30,7 +30,7 @@ export function registerBasicTools(registry:ToolRegistry) {
       child.on('close',code=>{clean();if(ctx.signal.aborted)return reject(ctx.signal.reason);resolve({text:JSON.stringify({exitCode:code,output,truncated:cut,timedOut:timeout}),isError:timeout||code!==0&&!cut});});
     });
   }});
-  registry.register({name:'sqlite_read',description:'只读查看 SQLite 表结构或执行单条 SELECT/WITH 查询。最多返回 200 行、256 KB，3 秒超时。禁止修改、扩展加载和连接其他数据库。',effect:'read',parameters:{type:'object',properties:{path:string,query:{type:'string',maxLength:16000}},required:['path'],additionalProperties:false},execute:async(args,ctx)=>{
+  registry.register({name:'sqlite_read',description:'只读查看 SQLite 表结构或执行单条 SELECT/WITH 查询。最多返回 200 行、256 KB，3 秒超时。禁止修改、扩展加载和连接其他数据库。',effect:'read',planSafe:true,parameters:{type:'object',properties:{path:string,query:{type:'string',maxLength:16000}},required:['path'],additionalProperties:false},execute:async(args,ctx)=>{
     const filename=await allowedPath(args.path,ctx);if(!(await stat(filename)).isFile())throw Error('请选择 SQLite 文件。');
     const query=String(args.query??"SELECT name,type,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY name");
     if(!/^\s*(SELECT|WITH)\b/i.test(query)||/;|\b(ATTACH|DETACH|PRAGMA|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|VACUUM|LOAD_EXTENSION|WRITEFILE|READFILE)\b/i.test(query))throw Error('仅允许一条不含数据库修改、文件函数或扩展操作的 SELECT/WITH 查询。');

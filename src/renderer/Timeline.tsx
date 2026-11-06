@@ -1,6 +1,7 @@
 import { CollaborationCard } from './CollaborationCard';
 import { ArtifactCard } from './ArtifactPreview';
 import { EditMessage, MessageVersions } from './MessageVersions';
+import {PlanCard} from './PlanCard';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Action, AgentSession, PendingRequest, ToolEvent, ChatMessage, FileArtifact } from '../shared/contracts';
 import type { CollaborationState } from '../shared/collaboration';
@@ -104,6 +105,7 @@ export function Timeline({ session, act, compact=false, renderRequest }: { sessi
     </article>}</div>)}
     {!compact&&tailReply&&turnDivider(tailReply)}
     {session.pending.filter(r=>r.id!==session.collaborationState?.confirmations&&(!r.toolId||!visibleTools.has(r.toolId))).map(renderRequest)}
+    <PlanCard session={session} act={act}/>
     {session.error&&<div className="error" role="alert">{session.error}</div>}
     {isBusy(session)&&!session.pending.length&&<div className="working"><i/>正在处理任务</div>}<div ref={end}/>
   </div>;

@@ -1,3 +1,5 @@
+import {StudioManager} from './studio/manager';
+import type {StudioAction} from '../shared/studio';
 import { IllustrationManager } from './illustration/manager';
 import { appendFileSync } from 'node:fs';
 import type { IllustrationAction } from '../shared/illustration';
@@ -18,7 +20,7 @@ import { WorkshopManager } from './workshop/manager';
 import { copyFile, readFile } from 'node:fs/promises';
 import type { WorkshopAction } from '../shared/workshop';
 
-protocol.registerSchemesAsPrivileged(['pet-skin', 'workshop', 'artifact', 'site-icon', 'illustration', 'wallpaper'].map(scheme => ({ scheme, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, ...(scheme === 'pet-skin' ? { stream: true } : {}) } })));
+protocol.registerSchemesAsPrivileged(['pet-skin', 'workshop', 'artifact', 'site-icon', 'illustration', 'wallpaper', 'studio'].map(scheme => ({ scheme, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, ...(['pet-skin','studio'].includes(scheme) ? { stream: true } : {}) } })));
 if (process.env.DRAGON_DATA_DIR) app.setPath('userData', path.resolve(process.env.DRAGON_DATA_DIR));
 else app.setPath('userData', path.join(app.getPath('appData'), 'DragonAgent'));
 let runtime: Runtime, workbench: BrowserWindow, pet: BrowserWindow, bubble: BrowserWindow, tray: Tray;
@@ -43,6 +45,7 @@ function createWindow(kind: 'workbench' | 'pet' | 'bubble') {
   void win.loadFile(path.join(root, 'renderer/index.html'), { query: { view: kind, theme } });
   return win;
 }
+let studio:StudioManager;
 let appliedChrome: string | undefined;
 function syncTheme() {
   const configured = runtime.state.settings.theme;
@@ -106,6 +109,14 @@ function menu() { Menu.buildFromTemplate([{ label: '打开 DragonAgent', click: 
 async function action(value: Action) {
   if (!value || typeof value !== 'object' || typeof value.type !== 'string') throw new Error('无效操作。');
   if(value.type==='window.exit'){app.quit();return;}
+  if(value.type.startsWith('studio.')){
+    const a=value as StudioAction;
+    if(a.type==='studio.skin.import'){const result=await dialog.showOpenDialog(workbench,{title:'导入桌宠素材',properties:[a.kind==='directory'?'openDirectory':'openFile'],filters:a.kind==='zip'?[{name:'桌宠素材包',extensions:['zip']}]:undefined});return result.canceled?undefined:studio.import(result.filePaths[0],a.kind);}
+    if(a.type==='studio.skin.export'){const result=await dialog.showSaveDialog(workbench,{title:'导出桌宠',defaultPath:'桌宠.zip',filters:[{name:'ZIP',extensions:['zip']}]});return result.canceled||!result.filePath?undefined:studio.export(a.id,result.filePath);}
+    if(a.type==='studio.character.upload'){const result=await dialog.showOpenDialog(workbench,{title:'选择角色立绘',properties:['openFile'],filters:[{name:'角色图片',extensions:['png','jpg','jpeg','webp']}]});return result.canceled?undefined:studio.upload(a.id,result.filePaths[0]);}
+    if(a.type==='studio.character.illustration'){const p=illustration.state.projects.find(p=>p.id===a.projectId),r=p?.runs.find(r=>r.id===a.runId);if(!r?.file||r.state!=='completed')throw Error('请选择已完成的插画');return studio.upload(a.id,await illustration.asset(r.file));}
+    return studio.action(a);
+  }
   if(value.type==='illustration.lora.import'){const result=await dialog.showOpenDialog(workbench,{title:'选择角色 LoRA',properties:['openFile'],filters:[{name:'SafeTensors',extensions:['safetensors']}]});if(!result.canceled)return illustration.importLora(value.id,result.filePaths[0]);return;}
   if(value.type==='illustration.save'){const p=illustration.state.projects.find(p=>p.id===value.id),run=p?.runs.find(r=>r.id===value.runId);if(!run?.file)throw Error('图片尚未生成');const source=await illustration.asset(run.file);const result=await dialog.showSaveDialog(workbench,{defaultPath:p!.name.replace(/[<>:"/\\|?*]/g,'_')+'.png'});if(result.filePath&&!result.canceled)await copyFile(source,result.filePath);return;}
   if(value.type.startsWith('illustration.'))return illustration.action(value as IllustrationAction);
@@ -201,6 +212,9 @@ else {
     illustration=new IllustrationManager({workerPath:path.join(root,'main/illustration-worker.cjs'),home,appData:app.getPath('appData'),fetch:civitaiFetch,loras:()=>workshop.state.projects,profiles:()=>runtime.state.settings.profiles,key:id=>runtime.secrets.get(id),changed:()=>{runtime.view.illustration=illustration.state;runtime.changed(false);}});
     runtime.view.illustration=illustration.state;
     runtime.illustration={list:()=>illustration.state.projects.map(p=>({id:p.id,name:p.name,status:p.status})),create:async(description,commandId)=>{const id=await illustration.action({type:'illustration.create',description,commandId});runtime.view.workbenchPage='illustration';runtime.view.workbenchPageRevision=(runtime.view.workbenchPageRevision??0)+1;runtime.changed(false);showWorkbench();return {id,status:'project-created',message:'已创建插画项目，尚未生成图片'};}};
+    studio=new StudioManager({home,binaries:root,dev:!app.isPackaged,fetch:(input,init)=>net.fetch(input instanceof URL?input.href:input,init),key:()=>runtime.secrets.get('studio:ark'),saveKey:value=>runtime.secrets.set('studio:ark',value),profiles:()=>runtime.state.settings.profiles,modelKey:id=>runtime.secrets.get('profile:'+id),changed:()=>{if(studio){runtime.view.studio=studio.state;runtime.changed(false);}},skin:data=>{runtime.view.skin=data;runtime.view.animationStartedAt=Date.now();runtime.changed(false);}});
+    runtime.view.studio=studio.state;await studio.init();
+    protocol.handle('studio',async request=>{try{const u=new URL(request.url);if(u.hostname!=='asset')throw Error('无效素材');const file=await studio.asset(decodeURIComponent(u.pathname.slice(1)));if(/\.(webm|mp4)$/i.test(file)){const bytes=await readFile(file),range=request.headers.get('range'),headers={'Content-Type':file.endsWith('.webm')?'video/webm':'video/mp4','Accept-Ranges':'bytes'};if(range){const match=/^bytes=(\d+)-(\d*)$/.exec(range);if(!match)return new Response(null,{status:416});const start=+match[1],end=Math.min(bytes.length-1,match[2]?+match[2]:bytes.length-1);if(start>end)return new Response(null,{status:416});return new Response(new Uint8Array(bytes.subarray(start,end+1)),{status:206,headers:{...headers,'Content-Length':String(end-start+1),'Content-Range':`bytes ${start}-${end}/${bytes.length}`}});}return new Response(new Uint8Array(bytes),{headers:{...headers,'Content-Length':String(bytes.length)}});}return await net.fetch(pathToFileURL(file).href);}catch{return new Response('素材不可用',{status:404});}});
     protocol.handle('illustration',async request=>{try{const u=new URL(request.url);if(u.hostname!=='asset')throw Error('无效素材');return await net.fetch(pathToFileURL(await illustration.asset(decodeURIComponent(u.pathname.slice(1)))).href);}catch{return new Response('素材不可用',{status:404});}});
     protocol.handle('wallpaper',async request=>{try{const u=new URL(request.url);if(u.hostname!=='bg')throw Error('无效壁纸');return await net.fetch(pathToFileURL(resolveWallpaper(u.pathname.slice(1))).href);}catch{return new Response('壁纸不可用',{status:404});}});
     protocol.handle('site-icon',async request=>{const u=new URL(request.url);if(u.hostname!=='icon')return new Response('',{status:404});const image=await siteIcon(decodeURIComponent(u.pathname.slice(1)));return image?new Response(new Uint8Array(image),{headers:{'Content-Type':'image/png','Cache-Control':'max-age=300'}}):new Response('',{status:404});});
@@ -277,5 +291,5 @@ runtime.on('change', () => { syncTheme(); const state = runtime.snapshot(); for 
   }).catch(error => { console.error(error); dialog.showErrorBox('DragonAgent 启动失败', String(error.message)); app.exit(1); });
 }
 app.on('window-all-closed', () => undefined);
-app.on('before-quit', event => { if (quitting) return; event.preventDefault(); quitting = true; globalShortcut.unregisterAll(); void (async () => { try { await illustration?.close(); await workshop?.dispose(); } finally { await runtime?.dispose(); } })().finally(() => { tray?.destroy(); app.quit(); }); });
+app.on('before-quit', event => { if (quitting) return; event.preventDefault(); quitting = true; globalShortcut.unregisterAll(); void (async () => { try { await studio?.close(); await illustration?.close(); await workshop?.dispose(); } finally { await runtime?.dispose(); } })().finally(() => { tray?.destroy(); app.quit(); }); });
 

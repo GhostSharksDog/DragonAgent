@@ -1,3 +1,4 @@
+import {DEFAULT_APPEARANCE,appearanceValues} from '../shared/appearance';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -23,12 +24,16 @@ export class Store {
   load(): PersistentState {
     const row = this.db.prepare('SELECT version,json FROM app_state WHERE id=1').get();
     if (!row) return initialState();
-    if (row.version !== 1 && row.version !== 2 && row.version !== 3 && row.version !== 4) throw new Error('数据版本不受支持，请使用匹配版本的 DragonAgent。');
-    if (row.version !== 4) {
+    if (row.version !== 1 && row.version !== 2 && row.version !== 3 && row.version !== 4 && row.version !== 5) throw new Error('数据版本不受支持，请使用匹配版本的 DragonAgent。');
+    if (row.version !== 5) {
       const filename = this.db.prepare('PRAGMA database_list').get()!.file as string;
       this.db.prepare('VACUUM INTO ?').run(`${filename}.v${row.version}-${Date.now()}.bak`);
     }
     const state = JSON.parse(String(row.json)) as PersistentState;
+    const oldAppearance=state.settings.appearance;
+    state.settings.appearance={...structuredClone(DEFAULT_APPEARANCE),...oldAppearance,...appearanceValues(oldAppearance??{})};
+    if(state.settings.wallpaper&&!state.settings.appearance.wallpapers.some(w=>w.file===state.settings.wallpaper!.file))state.settings.appearance.wallpapers.push({file:state.settings.wallpaper.file,name:state.settings.wallpaper.name,addedAt:Date.now(),usedAt:Date.now()});
+    for(const s of state.sessions)s.mode??='execute';
     if(state.petChat?.queue?.length)state.petChat.notice='上次待发送消息已保留，未自动重放。请核对后重新发送。';
     state.settings.limits ??= { concurrency: 3, children: 12, requests: null };
     for (const session of state.sessions) {
@@ -45,10 +50,11 @@ export class Store {
       session.pending = []; // Permissions are never replayed after a restart.
       for (const task of session.tasks ?? []) if (['queued', 'running', 'waiting'].includes(task.status)) task.status = 'interrupted';
     }
-    if (row.version !== 4) { state.settings.limits.requests = null; this.save(state); }
+    if (Number(row.version)<4) state.settings.limits.requests=null;
+    if(row.version!==5)this.save(state);
     return state;
   }
-  save(state: PersistentState) { this.db.prepare('INSERT INTO app_state VALUES(1,4,?) ON CONFLICT(id) DO UPDATE SET version=4,json=excluded.json').run(JSON.stringify(state)); }
+  save(state: PersistentState) { this.db.prepare('INSERT INTO app_state VALUES(1,5,?) ON CONFLICT(id) DO UPDATE SET version=5,json=excluded.json').run(JSON.stringify(state)); }
   secret(id: string): Uint8Array | undefined { return this.db.prepare('SELECT encrypted FROM secrets WHERE id=?').get(id)?.encrypted as Uint8Array | undefined; }
   setSecret(id: string, value: Uint8Array) { this.db.prepare('INSERT INTO secrets VALUES(?,?) ON CONFLICT(id) DO UPDATE SET encrypted=excluded.encrypted').run(id, value); }
   removeSecret(id: string) { this.db.prepare('DELETE FROM secrets WHERE id=?').run(id); }

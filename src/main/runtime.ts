@@ -1,3 +1,5 @@
+import {DEFAULT_APPEARANCE,appearanceValues} from '../shared/appearance';
+import { planMarkdown } from '../shared/planning';
 import { illustrationDefinitions } from './illustration/tools';
 import { captureVersion, rememberVersion, applyVersion } from './versions';
 import {routeChat} from './chat-routing';
@@ -122,8 +124,23 @@ export class Runtime extends EventEmitter {
         try{await job;}finally{this.routing.delete(action.commandId);}
         return true;
       }
+      case 'session.mode': {
+        const s=this.session(action.id);
+        if(!['plan','execute'].includes(action.mode)||s.backend!=='dragon'||s.collaboration?.enabled||s.readOnly||isBusy(s)||s.pending.length||this.state.petChat?.queue?.some(q=>q.sessionId===s.id))throw Error('请在普通 Dragon 聊天空闲且待发送队列为空时切换模式。');
+        s.mode=action.mode;this.changed();return true;
+      }
+      case 'session.plan.execute': {
+        const s=this.session(action.id),p=s.plans?.find(p=>p.id===action.versionId);
+        if(p?.execution?.commandId===action.commandId)return true;
+        if(s.mode!=='plan'||s.backend!=='dragon'||s.collaboration?.enabled||s.readOnly||isBusy(s)||s.pending.length||this.state.petChat?.queue?.some(q=>q.sessionId===s.id)||!p||p!==s.plans?.at(-1)||p.stale||p.execution||p.plan.questions.length)throw Error('请确认最新完整计划，等待当前任务与队列结束。');
+        if(!action.commandId||action.commandId.length>200)throw Error('无效请求编号');
+        s.mode='execute';p.execution={commandId:action.commandId,at:Date.now()};
+        try{this.send(s.id,'执行以下已确认计划：\n\n'+planMarkdown(p.plan),action.commandId,true);p.execution.runId=s.runId;this.changed();}
+        catch(error){s.mode='plan';p.execution=undefined;throw error;}return true;
+      }
       case 'session.collaboration': {
         const s=this.session(action.id);if(isBusy(s)||s.readOnly||s.backend!=='dragon')throw Error('请在 Dragon 聊天空闲时修改协作模式。');
+        if(action.config.enabled&&s.mode==='plan')throw Error('请先退出计划模式，再开启协作。');
         if(action.config.enabled){const profile=this.state.settings.profiles.find(p=>p.id===(action.config.executionProfileId??s.profileId));if(!profile||!/deepseek/i.test(profile.model))throw Error('请先选择 DeepSeek 执行模型。');}
         const choice=action.config.enabled&&action.config.plannerModel?await this.codexChoice(action.config.plannerModel,action.config.effort):undefined;
         if(isBusy(s)||s.readOnly||this.configuring)throw Error('任务已开始，协作配置未修改。');
@@ -247,8 +264,19 @@ export class Runtime extends EventEmitter {
       case 'memory.save': { if (!action.text.trim()) return; const id = action.id ?? randomUUID(); this.state.memory = [...this.state.memory.filter(m => m.id !== id), { id, text: action.text.trim().slice(0, 16000), tags: action.tags, createdAt: Date.now() }]; break; }
       case 'memory.delete': this.state.memory = this.state.memory.filter(m => m.id !== action.id); break;
       case 'assistant.preferences.save': this.state.settings.assistant = validAssistantPreferences(action.preferences); break;
-      case 'wallpaper.choose': { const source = await this.chooseWallpaperFile?.(); if (!source) return; const stored = storeWallpaper(source); this.state.settings.wallpaper = { ...stored, opacity: .55, blur: 0, dim: .2 }; this.changed(); return; }
-    case 'wallpaper.clear': { dropWallpaper(this.state.settings.wallpaper?.file); this.state.settings.wallpaper = null; this.changed(); return; }
+      case 'appearance.save': {const old=this.state.settings.appearance??structuredClone(DEFAULT_APPEARANCE);this.state.settings.appearance={...old,...appearanceValues({...old,...action.values}),tab:action.tab&&['desk','library','make'].includes(action.tab)?action.tab:old.tab};break;}
+      case 'appearance.preset.save': {const a=this.state.settings.appearance??=structuredClone(DEFAULT_APPEARANCE);const name=action.name.trim().slice(0,60);if(!name)throw Error('请输入预设名称');const old=a.presets.find(p=>p.id===action.id);if(old){old.name=name;}else{a.presets.push({id:randomUUID(),name,values:appearanceValues(a),theme:this.state.settings.theme,accent:this.state.settings.accent??'violet',wallpaper:structuredClone(this.state.settings.wallpaper)});}break;}
+      case 'appearance.preset.delete': {const a=this.state.settings.appearance;if(a)a.presets=a.presets.filter(p=>p.id!==action.id);break;}
+      case 'appearance.reset': {const a=this.state.settings.appearance??structuredClone(DEFAULT_APPEARANCE);this.state.settings.appearance={...a,...appearanceValues(DEFAULT_APPEARANCE)};this.state.settings.theme='light';this.state.settings.accent='violet';this.state.settings.wallpaper=null;break;}
+      case 'appearance.preset.apply': {
+        const a=this.state.settings.appearance??=structuredClone(DEFAULT_APPEARANCE),p=a.presets.find(p=>p.id===action.id);
+        if(p){this.state.settings.appearance={...a,...appearanceValues(p.values)};this.state.settings.theme=p.theme;this.state.settings.accent=p.accent;this.state.settings.wallpaper=p.wallpaper&&a.wallpapers.some(w=>w.file===p.wallpaper!.file)?structuredClone(p.wallpaper):null;}
+        else if(['light','dark','glass'].includes(action.id)){this.state.settings.appearance={...a,...appearanceValues(DEFAULT_APPEARANCE)};this.state.settings.theme=action.id==='dark'?'dark':'light';this.state.settings.accent='violet';if(action.id!=='glass')this.state.settings.wallpaper=null;else if(!this.state.settings.wallpaper&&a.wallpapers.length){const w=a.wallpapers[0];this.state.settings.wallpaper={file:w.file,name:w.name,opacity:.55,blur:0,dim:.2};}}else throw Error('预设不存在');break;
+      }
+      case 'wallpaper.select': {const a=this.state.settings.appearance??=structuredClone(DEFAULT_APPEARANCE),w=a.wallpapers.find(w=>w.file===action.file);if(!w)throw Error('壁纸不存在');w.usedAt=Date.now();this.state.settings.wallpaper={file:w.file,name:w.name,opacity:this.state.settings.wallpaper?.opacity??.55,blur:this.state.settings.wallpaper?.blur??0,dim:this.state.settings.wallpaper?.dim??.2};break;}
+      case 'wallpaper.delete': {const a=this.state.settings.appearance??=structuredClone(DEFAULT_APPEARANCE);if(!a.wallpapers.some(w=>w.file===action.file))throw Error('壁纸不存在');dropWallpaper(action.file);a.wallpapers=a.wallpapers.filter(w=>w.file!==action.file);for(const p of a.presets)if(p.wallpaper?.file===action.file)p.wallpaper=null;if(this.state.settings.wallpaper?.file===action.file)this.state.settings.wallpaper=null;break;}
+      case 'wallpaper.choose': { const source = await this.chooseWallpaperFile?.(); if (!source) return; const stored = storeWallpaper(source);const a=this.state.settings.appearance??=structuredClone(DEFAULT_APPEARANCE);a.wallpapers.unshift({...stored,addedAt:Date.now(),usedAt:Date.now()}); this.state.settings.wallpaper = { ...stored, opacity: .55, blur: 0, dim: .2 }; this.changed(); return; }
+    case 'wallpaper.clear': { this.state.settings.wallpaper = null; this.changed(); return; }
     case 'wallpaper.tune': { const w = this.state.settings.wallpaper; if (w) { const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v)); w.opacity = clamp(action.opacity ?? w.opacity, 0, 1); w.blur = clamp(action.blur ?? w.blur, 0, 24); w.dim = clamp(action.dim ?? w.dim, 0, .8); this.changed(); } return; }
     case 'settings.save': this.idleSettings(); if (action.limits) this.state.settings.limits = validLimits(action.limits); if (action.theme) this.state.settings.theme = action.theme; if (action.accent) this.state.settings.accent = action.accent; if (action.codexPath !== undefined) { this.state.settings.codexPath = action.codexPath; await this.codex.dispose(); } if (action.pet) this.state.settings.pet = { ...this.state.settings.pet, ...action.pet, scale: Math.max(.5, Math.min(2, action.pet.scale ?? this.state.settings.pet.scale)) }; break;
       case 'quota.refresh': await this.codex.quota(); return;
@@ -277,7 +305,7 @@ export class Runtime extends EventEmitter {
       else s.nativeId=message.beforeNativeId&&message.beforeNativeTurnId?await this.codex.forkBefore(message.beforeNativeId,message.beforeNativeTurnId):undefined;
       const index=s.messages.findIndex(m=>m.id===message.id),prior=s.messages.slice(0,index),runs=new Set(prior.map(m=>m.runId));
       s.messages=prior;s.tools=s.tools.filter(t=>runs.has(t.runId));s.tasks=[];s.nativeTurnId=message.beforeNativeTurnId;
-      s.collaborationHistory=(s.collaborationHistory??[]).filter(c=>runs.has(c.runId));s.collaborationState=undefined;s.versionId=randomUUID();s.draftAttachments=structuredClone(message.attachments??[]);s.status='idle';s.error=undefined;this.changed();
+      s.collaborationHistory=(s.collaborationHistory??[]).filter(c=>runs.has(c.runId));s.collaborationState=undefined;s.plans=s.plans?.filter(p=>runs.has(p.runId)).map(p=>({...p,stale:true}));s.versionId=randomUUID();s.draftAttachments=structuredClone(message.attachments??[]);s.status='idle';s.error=undefined;this.changed();
       this.send(id,text,commandId);return true;
     } catch(error){if(!this.runs.has(id)){s.status=status;this.changed();}throw error;}
   }
@@ -372,13 +400,16 @@ export class Runtime extends EventEmitter {
     if(!text.trim())text='请阅读这些资料，帮我整理要点。';
     if (s.backend === 'dragon' && !this.state.settings.profiles.some(p => p.id === s.profileId)) throw new Error('请在设置中添加模型 API，再创建会话。');
     const runId = randomUUID(), controller = new AbortController();
+    const confirmed=s.plans?.find(p=>p.execution?.commandId===commandId);if(confirmed?.execution)confirmed.execution.runId=runId;
     s.runId = runId; s.status = 'running'; s.error = undefined; if(!independent)s.draft = ''; s.updatedAt = Date.now();
     if (!s.messages.length) s.title = text.trim().slice(0, 25);
     s.messages.push({ id: randomUUID(), commandId, role: 'user', text, createdAt: Date.now(), runId, sequence:Math.max(0,...s.messages.map(m=>m.sequence??0),...s.tools.map(t=>t.sequence??0))+1, attachments: attached, contextCheckpoint:runId, beforeNativeId:s.nativeId, beforeNativeTurnId:s.nativeTurnId }); if(!independent)s.draftAttachments=[];
     let outputId: string | undefined;
     let sequence=Math.max(0,...s.messages.map(m=>m.sequence??0),...s.tools.map(t=>t.sequence??0));
     const live = () => s.runId === runId && !controller.signal.aborted;
+    if(s.mode==='plan'&&s.plans?.length)s.plans.at(-1)!.stale=true;
     const hooks: BackendHooks = {
+      plan: plan=>{if(!live()||s.mode!=='plan')throw Error('计划轮次已失效');s.plans??=[];s.plans.push({id:randomUUID(),runId,createdAt:Date.now(),plan:structuredClone(plan)});this.changed();},
       text: (value, replace) => { if (!live()) return; let m = s.messages.find(v => v.id === outputId); if (!m) { m = { id: randomUUID(), role: 'assistant', text: '', createdAt: Date.now(), runId, partial: true, sequence:++sequence }; s.messages.push(m); outputId = m.id; } m.text = replace ? value : m.text + value; this.changed(); },
       tool: event => { if (!live()) return; if (event.status === 'running' || event.status === 'queued') { const prior=s.messages.find(m=>m.id===outputId); if(prior)prior.partial=false; outputId=undefined; } const current = s.tools.find(t => t.id === event.id); if (current) { const status = current.status === 'declined' ? 'declined' : event.status ?? current.status; Object.assign(current, { ...event, name: event.name || current.name, status, ...(['completed','error','declined','cancelled','unknown'].includes(status) ? {completedAt:Date.now()} : {}) }); } else s.tools.push({ arguments: '', createdAt: Date.now(), runId, status: 'running', sequence:++sequence, ...event }); this.changed(); },
       request: (req, signal) => new Promise(resolve => {

@@ -34,6 +34,7 @@ export interface McpConfig {
 }
 export interface McpStatus { id: string; state: 'disabled' | 'connecting' | 'connected' | 'error'; tools: number; error?: string }
 export interface AppSettings {
+  appearance?:import('./appearance').AppearanceSettings;
   layout?: { leftCollapsed: boolean; rightCollapsed: boolean };
   assistant?: import('./persona').AssistantPreferences;
   selectedBackend?: BackendKind;
@@ -46,7 +47,7 @@ export interface AppSettings {
   wallpaper?: { file: string; name: string; opacity: number; blur: number; dim: number } | null;
 }
 export interface ChatMessage { sequence?: number; id: string; commandId?: string; role: 'user' | 'assistant' | 'notice'; text: string; createdAt: number; runId?: string; partial?: boolean; attachments?: ChatAttachment[]; contextCheckpoint?: string; beforeNativeTurnId?: string; beforeNativeId?: string }
-export interface ConversationVersion { collaborationState?: AgentSession['collaborationState']; collaborationHistory?:AgentSession['collaborationHistory']; id: string; label: string; createdAt: number; messages: ChatMessage[]; tools: ToolEvent[]; tasks?: AgentTask[]; nativeId?: string; nativeTurnId?: string; checkpoint: string; status: RunStatus; error?: string; usage?: AgentSession['usage'] }
+export interface ConversationVersion { mode?:AgentSession['mode'];plans?:AgentSession['plans']; collaborationState?: AgentSession['collaborationState']; collaborationHistory?:AgentSession['collaborationHistory']; id: string; label: string; createdAt: number; messages: ChatMessage[]; tools: ToolEvent[]; tasks?: AgentTask[]; nativeId?: string; nativeTurnId?: string; checkpoint: string; status: RunStatus; error?: string; usage?: AgentSession['usage'] }
 export interface ToolEvent { sequence?: number; id: string; name: string; arguments: string; result?: string; status: 'queued' | 'approval' | 'running' | 'completed' | 'declined' | 'error' | 'cancelled' | 'unknown'; createdAt: number; startedAt?: number; completedAt?: number; cwd?: string; exitCode?: number | null; runId: string; agentId?: string }
 export interface PendingRequest {
   source?: {agentId:string;title:string};
@@ -57,6 +58,7 @@ export interface PendingRequest {
   sessionId: string; runId: string;
 }
 export interface AgentSession {
+  mode?:'execute'|'plan'; plans?:import('./planning').PlanVersion[];
   queuedMessages?: {commandId:string;text:string;attachments?:ChatAttachment[];paused:boolean}[];
   attempts?: (import('../../packages/agent-core/src/types').RequestAttempt & {runId:string;agentId:string})[];
   collaboration?: import('./collaboration').CollaborationConfig;
@@ -82,6 +84,7 @@ export interface ArtifactPreview { offset?:number; nextOffset?:number; page?:num
 export interface ProviderBalance { profileId: string; status: 'loading' | 'ready' | 'error' | 'unsupported'; available?: boolean; updatedAt?: number; error?: string; balances: { currency: string; total: string; granted: string; toppedUp: string }[] }
 export interface BackendState { state: 'stopped' | 'starting' | 'ready' | 'error'; message: string }
 export interface Snapshot {
+  studio?:import('./studio').StudioSnapshot;
   illustration?: import('./illustration').IllustrationSnapshot;
   petChat?: {sessionId?:string;pinned?:boolean;draft?:string;notice?:string;attachments?:ChatAttachment[];queue?:{commandId:string;sessionId:string;text:string;attachments?:ChatAttachment[]}[]};
   artifactPreview?: ArtifactPreview;
@@ -97,6 +100,7 @@ export interface Snapshot {
   petView: 'hidden' | 'compose' | 'reply' | 'quota'; animationStartedAt: number; version: string;
 }
 export interface BackendHooks {
+  plan?(plan:import('./planning').DragonPlan):void;
   attempt?(attempt:import('../../packages/agent-core/src/types').RequestAttempt,agentId:string):void;
   nativeTurnId?(id: string): void;
   text(text: string, replace?: boolean): void;
@@ -111,7 +115,7 @@ export interface AgentBackend {
   cancel(session: AgentSession): Promise<void>;
   dispose(): Promise<void>;
 }
-export type Action = {type:'window.exit'} | import('./illustration').IllustrationAction | WorkshopAction
+export type Action = import('./studio').StudioAction | {type:'window.exit'} | import('./illustration').IllustrationAction | WorkshopAction
   | {type:'pet.chat.bind';id?:string;pinned:boolean}
   | {type:'pet.chat.draft';text:string}
   | {type:'pet.chat.send';text:string;commandId:string}
@@ -119,6 +123,8 @@ export type Action = {type:'window.exit'} | import('./illustration').Illustratio
   | {type:'pet.chat.attach';files:DroppedFile[]}
   | {type:'pet.chat.pickFiles'}
   | {type:'pet.chat.removeAttachment';id:string}
+  | {type:'session.mode';id:string;mode:'execute'|'plan'}
+  | {type:'session.plan.execute';id:string;versionId:string;commandId:string}
   | { type:'session.collaboration'; id:string; config:import('./collaboration').CollaborationConfig }
   | { type: 'artifact.preview'; sessionId: string; artifactId: string; offset?:number; page?:number }
   | { type: 'artifact.reveal'; sessionId: string; artifactId: string }
@@ -160,6 +166,11 @@ export type Action = {type:'window.exit'} | import('./illustration').Illustratio
   | { type: 'memory.delete'; id: string }
   | { type: 'legacy.import' }
   | { type: 'settings.save'; theme?: AppSettings['theme']; accent?: AppSettings['accent']; codexPath?: string; pet?: Partial<AppSettings['pet']>; limits?: AppSettings['limits'] }
+  | {type:'appearance.save';values:Partial<import('./appearance').AppearanceValues>;tab?:import('./appearance').AppearanceSettings['tab']}
+  | {type:'appearance.preset.save';name:string;id?:string}
+  | {type:'appearance.preset.apply'|'appearance.preset.delete';id:string}
+  | {type:'appearance.reset'}
+  | {type:'wallpaper.select'|'wallpaper.delete';file:string}
   | { type: 'wallpaper.choose' }
   | { type: 'wallpaper.clear' }
   | { type: 'wallpaper.tune'; opacity?: number; blur?: number; dim?: number }

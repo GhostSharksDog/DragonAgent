@@ -37,7 +37,7 @@ export interface RequestAttempt { retry?:number; id: string; profileId: string; 
 export interface ModelRequest { profile: ModelProfile; key?: string; messages: Message[]; tools: ToolSchema[]; maxOutput: number; reasoningEffort?: string; signal: AbortSignal; onText(text: string): void }
 export interface ModelResponse { message: Message; usage: Usage; finish: 'stop' | 'tools' | 'length' }
 export interface ModelAdapter { generate(request: ModelRequest): Promise<ModelResponse>; countTokens?(request: Omit<ModelRequest, 'signal' | 'onText' | 'key'>): Promise<number> }
-export interface Grant { folders: string[]; origins: string[]; browserInput: boolean; terminal: boolean; approvalMode?: 'ask' | 'auto' | 'full'; allFolders?: boolean; allOrigins?: boolean }
+export interface Grant { mode?: 'execute' | 'plan'; folders: string[]; origins: string[]; browserInput: boolean; terminal: boolean; approvalMode?: 'ask' | 'auto' | 'full'; allFolders?: boolean; allOrigins?: boolean }
 export interface Limits { concurrency: number; children: number; requests: number | null }
 export const DEFAULT_LIMITS: Limits = { concurrency: 3, children: 12, requests: null };
 export type AgentStatus = 'queued' | 'running' | 'waiting' | 'completed' | 'cancelled' | 'error' | 'paused' | 'interrupted';
@@ -82,6 +82,8 @@ export interface ToolContext {
   question(questions: { id: string; question: string; options?: string[] }[]): Promise<Record<string, string>>;
 }
 export interface ToolDefinition extends ToolSchema {
+  /** Host-audited planning access; never derived from remote MCP annotations. */
+  planSafe?: boolean;
   effect: 'read' | 'write' | 'unknown' | 'control';
   approval?: 'managed';
   parallelSafe?: boolean;
