@@ -27,6 +27,7 @@
 |---|---|---|
 | `DragonAgent-Setup-0.7.0.exe` | 312.9 MB | `8eaa1a10128c01fa83d49c6b75bb02084f6d30426c6cd49b7d6fa4b513be348d` |
 | `DragonAgent-0.7.0-win.zip` | 423.6 MB | `34575f77b398d1a12d8931f877d1a476704eebfc369a68830a823e34447f05ad` |
+| `dragon-agent-core-0.4.0.tgz` | 61 KB | `e7c1425db943d5a7315798ceebd654b7a1d5ab42c4fd93ab6ceda531fe3215ab` |
 
 校验文件：`release/0.7.0/SHA256SUMS.txt`。
 

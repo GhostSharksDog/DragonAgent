@@ -39,7 +39,9 @@
 
 ### 打包与发行候选
 
-- `npm run package` 成功：`release/0.7.0/win-unpacked`、`DragonAgent-Setup-0.7.0.exe`（312.9 MB）、`DragonAgent-0.7.0-win.zip`（423.6 MB）；`SHA256SUMS.txt` 已生成。
+- `npm run package` 成功：`release/0.7.0/win-unpacked`、`DragonAgent-Setup-0.7.0.exe`（312.9 MB）、`DragonAgent-0.7.0-win.zip`（423.6 MB）、`dragon-agent-core-0.4.0.tgz`；`SHA256SUMS.txt` 已生成。`scripts/package.mjs` 现在会同时打包 agent-core，避免发行校验缺件。
+- `node scripts/release-check.mjs`：6783 个文件、违禁文件 0、主进程编译产物一致、图标尺寸一致、3 个产物哈希写入 `test-results/release-check.json`。
+- `scripts/promote-release.ps1` 的固定入口替换流程已加入云端桌宠未完成操作检查（运行中/未核对/未知状态都会拒绝替换），仍**未执行**替换。
 - 发行包抽查包含：`node_modules/fflate`、`dist/runtime/media/ffmpeg.exe`/`ffprobe.exe`/`manifest.json`、FFmpeg 许可与 README、Codex 运行时、两套内置桌宠素材；抽查未发现数据库/密钥/测试用户数据。
 - 打包后冒烟：`win-unpacked/DragonAgent.exe` 以独立数据目录启动，欢迎页视频皮肤与桌宠窗口正常，版本 0.7.0；从 ZIP 导入桌宠成功（验证 fflate 在发行包内可用）；打包版桌宠库中两套内置素材缩略图均能加载（逐帧 atlas 1632×，视频首帧 272×），验证发行包内 FFmpeg 路径。
 - **未替换固定入口 `release\win-unpacked`，未发布。**

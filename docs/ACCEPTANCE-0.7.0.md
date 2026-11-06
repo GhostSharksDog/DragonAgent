@@ -20,6 +20,7 @@
 | 打包 | `npm run package`：Setup 312.9 MB、ZIP 423.6 MB | 通过 |
 | 打包冒烟 | 独立数据目录启动、视频皮肤、桌宠窗口、ZIP 导入、库内缩略图（含发行包 FFmpeg） | 通过 |
 | 发行内容抽查 | fflate、ffmpeg/ffprobe+manifest、Codex、内置桌宠、FFmpeg 许可；无数据库/密钥 | 通过 |
+| 发行完整性 | `node scripts/release-check.mjs`：6783 个文件、违禁 0、主进程编译一致、图标尺寸、3 个产物 | 通过 |
 | 真实方舟立绘/视频 | 需要应用内 Key、已开通模型和用户确认预算 | **未执行** |
 | 真实 ComfyUI 冷启动 + Animagine 单图 | `scripts/comfy-live-check.mjs`：本机安装检测、冷启动、768×1024 真实生成（102 秒），输出 PNG | 通过 |
 | 插画页布局 | `npm run test:illustration-layout`：24 组窗口/主题/缩放，无横向溢出 | 通过 |
@@ -31,6 +32,7 @@
 
 - `release/0.7.0/DragonAgent-Setup-0.7.0.exe`：`8eaa1a10128c01fa83d49c6b75bb02084f6d30426c6cd49b7d6fa4b513be348d`
 - `release/0.7.0/DragonAgent-0.7.0-win.zip`：`34575f77b398d1a12d8931f877d1a476704eebfc369a68830a823e34447f05ad`
+- `release/0.7.0/dragon-agent-core-0.4.0.tgz`：`e7c1425db943d5a7315798ceebd654b7a1d5ab42c4fd93ab6ceda531fe3215ab`
 - 校验文件：`release/0.7.0/SHA256SUMS.txt`
 
 ## 已知限制
