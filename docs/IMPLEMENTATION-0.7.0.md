@@ -58,7 +58,8 @@
 - `npm run build`：通过（Vite 主包 >500 KB 警告仍在）。
 - `npm test`：**66 通过、0 失败**。
 - `npm run test:workbench`、`test:queue`、`test:ui`、`test:planning`、`test:media`、`test:composer`、`test:reasoning`、`test:context-bar`、`test:appearance`：全部通过。
-- 真实方舟、真实 Pixiv、真实 ComfyUI 冷启动：**未执行/未验收**；固定入口替换与 GitHub 发布**未执行**。
+- 真实方舟、真实 Pixiv、真实 ComfyUI 冷启动：**未执行/未验收**；固定入口替换**未执行**。
+- 源码已按核心、云端制作、外观界面、发行文档分提交并推送到 GitHub `main`；候选验收报告见 [ACCEPTANCE-0.7.0.md](ACCEPTANCE-0.7.0.md)。
 
 ## 仍未完成
 
