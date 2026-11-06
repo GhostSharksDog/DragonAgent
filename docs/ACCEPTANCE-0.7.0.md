@@ -24,6 +24,7 @@
 | 真实方舟立绘/视频 | 需要应用内 Key、已开通模型和用户确认预算 | **未执行** |
 | 真实 ComfyUI 冷启动 + Animagine 单图 | `scripts/comfy-live-check.mjs`：本机安装检测、冷启动、768×1024 真实生成（102 秒），输出 PNG | 通过 |
 | 插画页布局 | `npm run test:illustration-layout`：24 组窗口/主题/缩放，无横向溢出 | 通过 |
+| 原生标题栏 | `node scripts/window-chrome-check.mjs`：原生命中、双击最大化消息、亮/暗标题像素；物理拖拽因 Windows 前台限制未验证 | 通过（拖拽待补） |
 | 真实 Pixiv/识图 | 需要 Pixiv 登录后集中验收 | **未执行** |
 | 固定入口替换 | `release\win-unpacked` 未替换（等待验收通过、空闲、备份） | **未执行** |
 | GitHub 源码推送 | `main` 已推送（本报告所在提交） | 完成 |
