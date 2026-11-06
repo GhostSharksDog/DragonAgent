@@ -18,8 +18,9 @@ try{
   await act({type:'illustration.launch.save',config:{endpoint:fixture.endpoint,python:'unused',entry:'unused',modelsRoot:home,output:home,source:'manual'}});
   const parameters=(await snap()).illustration.projects[0].parameters;parameters.positive='silver hair, reading book, warm light';
   await act({type:'illustration.update',id,parameters});await act({type:'illustration.generate',id,commandId:'layout-generate'});
-  await page.waitForFunction(async()=>{const p=(await window.dragon.snapshot()).illustration.projects[0];return p.runs.length&&['completed','error','unknown','cancelled'].includes(p.runs[0].state);},null,{timeout:30000});
-  const project=(await snap()).illustration.projects[0];assert.equal(project.runs[0].state,'completed',project.error);
+  let project;
+  for(let i=0;i<120;i++){project=(await snap()).illustration.projects[0];if(project.runs.length&&['completed','error','unknown','cancelled'].includes(project.runs[0].state))break;await page.waitForTimeout(500);}
+  assert.equal(project.runs[0].state,'completed',project.error);
   await act({type:'window.workbench',page:'illustration'});await page.locator('.illustration-page').waitFor();
   await act({type:'layout.save',leftCollapsed:true,rightCollapsed:true});
   const click=async locator=>{await locator.scrollIntoViewIfNeeded();await locator.click({timeout:5000});};

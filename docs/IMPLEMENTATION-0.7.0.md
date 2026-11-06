@@ -48,6 +48,7 @@
 
 - 真实 ComfyUI 冷启动验收：自动检测本机 Comfy Desktop 安装（`standalone-env` 之外的 `.venv`），启动 ComfyUI，使用 Animagine XL 4.0 Opt 生成 768×1024 单图，102 秒完成；生成文件统一转码为 PNG 保存（此前 ComfyUI 返回 JPEG 却以 `.png` 落盘）。
 - 新增 `scripts/comfy-live-check.mjs`（`npm run test:comfy-live`）：需要本机 ComfyUI + GPU，不属于常规 `npm test`；运行结束只停止自己启动的 ComfyUI。
+- 恢复插画布局检查的测试依赖 `ws`，并把异步 `waitForFunction` 改为显式轮询；24 组窗口/主题/缩放组合通过。
 
 ### 外观与输入
 

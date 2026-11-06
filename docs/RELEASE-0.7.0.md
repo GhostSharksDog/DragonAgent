@@ -17,6 +17,7 @@
 - `npm test`：66 通过、0 失败。
 - 集成脚本：`test:workbench`、`test:queue`、`test:ui`、`test:planning`、`test:media`、`test:composer`、`test:reasoning`、`test:context-bar`、`test:appearance` 全部通过。
 - 真实 ComfyUI 冷启动 + Animagine 单图：本机 Comfy Desktop 安装检测、冷启动、768×1024 生成（102 秒），输出 PNG；脚本 `npm run test:comfy-live`。
+- 插画页布局：`npm run test:illustration-layout` 的 24 组窗口/主题/缩放组合通过。
 - 安装包冒烟：`release/0.7.0/win-unpacked/DragonAgent.exe` 可启动，欢迎页视频皮肤与桌宠窗口正常，版本 0.7.0；发行包内的 ZIP 桌宠导入成功（fflate 可用）。
 - 发行包抽查：含 fflate、ffmpeg/ffprobe 与 manifest、内置桌宠素材、Codex 运行时、FFmpeg 许可材料；抽查未发现数据库、密钥或测试用户数据。
 
