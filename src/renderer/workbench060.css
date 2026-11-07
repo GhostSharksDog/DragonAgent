@@ -31,4 +31,55 @@
 .app-shell.left-collapsed .sidebar .new-chat>span{display:none}
 .app-shell.left-collapsed .brand{justify-content:center}
 
-.dragon-plan-card{max-width:var(--chat-width,880px);margin:18px auto;padding:20px;border:1px solid var(--purple);border-radius:16px;background:var(--panel);min-width:0}.dragon-plan-card header,.dragon-plan-card footer{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.dragon-plan-card header{justify-content:space-between;margin-bottom:14px}.dragon-plan-card footer{justify-content:flex-end;margin-top:16px}.plan-indicator{color:var(--purple);background:var(--soft);border-color:var(--line)}
+/* 计划是回答的一部分：卡片跟消息流滚动，不再使用顶部摘要条。 */
+.dragon-plan-card{max-width:var(--chat-width,880px);margin:6px auto 28px;padding:17px 20px 14px;border:1px solid var(--line);border-radius:16px;background:var(--panel);box-shadow:0 2px 10px #1820330a;min-width:0}
+.dragon-plan-head{display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0}
+.dragon-plan-kicker{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:11px;font-weight:600;letter-spacing:.02em}
+.dragon-plan-kicker svg{color:var(--purple)}
+.dragon-plan-tools{display:flex;align-items:center;gap:5px;flex:none}
+.dragon-plan-version{color:var(--muted);font-size:10px}
+.dragon-plan-icon{width:27px;height:27px;padding:0;border-radius:7px;color:var(--muted)}
+.dragon-plan-icon:hover{color:var(--purple);background:var(--soft)}
+.dragon-plan-body{max-height:260px;overflow:auto;overscroll-behavior:contain;padding:1px 7px 1px 0;margin-top:2px;scrollbar-gutter:stable}
+.dragon-plan-body .rich-text{font-size:14px;line-height:1.72}
+.dragon-plan-body .rich-text h1{font-size:22px;line-height:1.35;margin:12px 0 10px;letter-spacing:-.35px}
+.dragon-plan-body .rich-text h2{font-size:16px;line-height:1.45;margin:18px 0 7px}
+.dragon-plan-body .rich-text h3{font-size:14px;margin-top:14px}
+.dragon-plan-body .rich-text p{margin-bottom:9px}
+.dragon-plan-body .rich-text ul,.dragon-plan-body .rich-text ol{margin:5px 0 12px;padding-left:21px}
+.dragon-plan-body .rich-text li{margin:4px 0}
+.dragon-plan-execution{margin:10px 0 0;color:var(--muted);font-size:11px}
+.dragon-plan-footer{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-top:13px;padding-top:11px;border-top:1px solid var(--line)}
+.dragon-plan-note{color:var(--muted);font-size:11px;line-height:1.5}
+.dragon-plan-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-left:auto}
+.dragon-plan-actions button{font-size:11px;padding:7px 11px}
+.dragon-plan-actions .primary{min-width:104px}
+.dragon-plan-history{color:var(--muted);font-size:10px}
+.plan-indicator{color:var(--purple);background:var(--soft);border-color:var(--line)}
+@media(max-width:700px){.dragon-plan-card{margin-left:0;margin-right:0;padding:14px 15px 12px}.dragon-plan-body{max-height:220px}.dragon-plan-footer{align-items:flex-start}.dragon-plan-actions{margin-left:0}}
+
+/* 计划状态标签；计划正文已经在回答卡片里，不再有顶部摘要条。 */
+.plan-banner-badge{display:inline-flex;align-items:center;gap:4px;flex:none;color:var(--purple);font-size:10px;font-weight:650;letter-spacing:.4px;text-transform:uppercase}
+.plan-banner-status{flex:none;padding:2px 7px;border-radius:999px;background:var(--soft);color:var(--purple);font-size:10px;white-space:nowrap}
+.dragon-plan-card[data-status=running] .plan-banner-status{background:#e8f1ff;color:#4e78a8}
+.dragon-plan-card[data-status=completed] .plan-banner-status{background:#e7f4ec;color:#4c8468}
+.dragon-plan-card[data-status=error] .plan-banner-status,.dragon-plan-card[data-status=cancelled] .plan-banner-status{background:#fbecf0;color:#a45d70}
+.dragon-plan-card[data-status=stale] .plan-banner-status{background:#fff3dc;color:#9b7332}
+.dragon-plan-card[data-status=running] .dragon-plan-kicker svg{animation:plan-pulse 1.6s ease-in-out infinite}
+@keyframes plan-pulse{50%{opacity:.55}}
+.plan-inspector{display:flex;flex-direction:column;gap:11px;min-width:0}
+.plan-inspector-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.plan-inspector-head>div{display:flex;align-items:center;gap:8px;font-size:12px}
+.plan-version-picker{font-size:10px;color:var(--muted);gap:4px}
+.plan-version-picker select{font-size:11px;padding:6px 7px}
+.plan-inspector-meta{display:flex;flex-direction:column;gap:3px;color:var(--muted);font-size:10px;line-height:1.5}
+.plan-inspector-body{min-width:0;font-size:11px}
+.plan-inspector-body .rich-text{font-size:11px;line-height:1.65}
+.plan-inspector-body .rich-text h1{font-size:16px;line-height:1.3;margin-bottom:10px}
+.plan-inspector-body .rich-text h2{font-size:13px;margin-top:16px}
+.plan-inspector-body .rich-text h3{font-size:12px}
+.plan-inspector-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;padding-top:8px}
+.plan-inspector-actions button{font-size:10px;padding:7px 9px}
+.plan-inspector-actions .primary{flex:1;min-width:120px}
+.inspector:has(.plan-inspector){width:min(390px,42vw)}
+@media(max-width:900px){.inspector:has(.plan-inspector){width:100%}}

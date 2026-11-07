@@ -2,7 +2,15 @@ import type { WorkPlan } from './collaboration';
 export interface DragonPlan extends WorkPlan {
   background: string; requirements: string[]; constraints: string[]; assumptions: string[]; questions: string[];
 }
-export interface PlanVersion { id:string; runId:string; createdAt:number; plan:DragonPlan; stale?:boolean; execution?:{commandId:string;runId?:string;at:number} }
+export type PlanExecutionStatus = 'running' | 'completed' | 'error' | 'cancelled' | 'paused';
+export interface PlanExecution {
+  commandId: string;
+  runId?: string;
+  at: number;
+  status?: PlanExecutionStatus;
+  finishedAt?: number;
+}
+export interface PlanVersion { id:string; runId:string; createdAt:number; plan:DragonPlan; stale?:boolean; execution?:PlanExecution }
 const text={type:'string',minLength:1,maxLength:16000};
 const strings={type:'array',items:text,maxItems:50};
 export const dragonPlanSchema={type:'object',additionalProperties:false,required:['goal','background','requirements','constraints','assumptions','questions','steps','checks'],properties:{goal:text,background:text,requirements:strings,constraints:strings,assumptions:strings,questions:strings,checks:strings,steps:{type:'array',minItems:1,maxItems:24,items:{type:'object',additionalProperties:false,required:['id','title','instructions','dependsOn','outputs','checks'],properties:{id:text,title:text,instructions:text,dependsOn:strings,outputs:strings,checks:strings}}}}};

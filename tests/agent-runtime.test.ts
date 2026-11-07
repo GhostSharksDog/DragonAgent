@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { AgentRuntime, MemorySessionStore, ToolRegistry, type ModelAdapter, type ModelRequest, type Message, type ToolResult } from '../packages/agent-core/src';
+import { AgentRuntime, MemorySessionStore, ModelStreamError, ToolRegistry, type ModelAdapter, type ModelRequest, type Message, type ToolResult } from '../packages/agent-core/src';
 import { SqliteSessionStore } from '../packages/agent-core/src/sqlite-store';
 const profile = { id: 'p', model: 'fixture', protocol: 'openai-completions' as const, baseUrl: 'http://fixture', contextWindow: 65536, maxOutput: 4096 };
 const grant = { folders: [] as string[], origins: [], browserInput: false, terminal: false };
@@ -106,4 +106,17 @@ test('DeepSeek ����ǿ�����������ô���ÿ��
   const { runtime } = harness(async request => { seen.push(request.reasoningEffort); return response({ role: 'assistant', text: 'ok' }); });
   await runtime.run({ sessionId: 'effort', profileId: 'p', prompt: 'go', grant, reasoningEffort: 'max' });
   assert.deepEqual(seen, ['max']);
+});
+
+test('流式断流只在没有输出时自动重试两次', async () => {
+  let calls = 0;
+  const { runtime } = harness(async () => { calls++; if (calls < 3) throw new ModelStreamError('模型连接被中断，本轮还没有产生输出。', true, true); return response({ role: 'assistant', text: 'ok' }); });
+  const result = await runtime.run({ sessionId: 'retry-safe', profileId: 'p', prompt: 'go', grant });
+  assert.equal(result.status, 'completed'); assert.equal(calls, 3);
+});
+test('已有输出的断流不会自动重放', async () => {
+  let calls = 0;
+  const { runtime } = harness(async () => { calls++; throw new ModelStreamError('模型连接被中断，当前回复不完整。', true, false); });
+  const result = await runtime.run({ sessionId: 'retry-unsafe', profileId: 'p', prompt: 'go', grant });
+  assert.equal(result.status, 'error'); assert.equal(calls, 1); assert.match(result.error ?? '', /连接被中断/);
 });

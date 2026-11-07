@@ -42,7 +42,7 @@ export interface AppSettings {
   selectedCodexModel?: string; selectedCodexEffort?: string;
   limits: { concurrency: number; children: number; requests: number | null };
   profiles: ModelProfile[]; selectedProfile: string; mcp: McpConfig[]; codexPath: string;
-  pet: { visible: boolean; scale: number; alwaysOnTop: boolean; x?: number; y?: number; shortcut: string; chatMode?: 'simple' | 'detailed' };
+  pet: { visible: boolean; scale: number; alwaysOnTop: boolean; x?: number; y?: number; shortcut: string; chatMode?: 'simple' | 'detailed'; behavior: import('./pet-behavior').PetBehavior };
   theme: 'light' | 'dark' | 'system';
   accent: 'violet' | 'teal' | 'amber' | 'ink';
   wallpaper?: { file: string; name: string; opacity: number; blur: number; dim: number } | null;
@@ -89,6 +89,7 @@ export interface Snapshot {
   illustration?: import('./illustration').IllustrationSnapshot;
   petChat?: {sessionId?:string;pinned?:boolean;draft?:string;notice?:string;attachments?:ChatAttachment[];queue?:{commandId:string;sessionId:string;text:string;attachments?:ChatAttachment[]}[]};
   artifactPreview?: ArtifactPreview;
+  planPreview?: { sessionId: string; planId: string; at: number };
   balances?: ProviderBalance[];
   codexCatalog: CodexCatalog;
   resolvedTheme: 'light' | 'dark';
@@ -127,6 +128,7 @@ export type Action = import('./studio').StudioAction | {type:'window.exit'} | im
   | {type:'pet.chat.removeAttachment';id:string}
   | {type:'session.mode';id:string;mode:'execute'|'plan'}
   | {type:'session.plan.execute';id:string;versionId:string;commandId:string}
+  | {type:'session.plan.preview';sessionId:string;planId:string}
   | { type:'session.collaboration'; id:string; config:import('./collaboration').CollaborationConfig }
   | { type: 'artifact.preview'; sessionId: string; artifactId: string; offset?:number; page?:number }
   | { type: 'artifact.reveal'; sessionId: string; artifactId: string }
@@ -180,6 +182,7 @@ export type Action = import('./studio').StudioAction | {type:'window.exit'} | im
   | { type: 'pet.toggle' }
   | { type: 'pet.view'; view: Snapshot['petView'] }
   | { type: 'pet.chatMode'; mode: 'simple' | 'detailed' }
+  | { type: 'pet.behavior'; behavior: import('./pet-behavior').PetBehavior }
   | { type: 'pet.drag'; dx: number; dy: number }
   | { type: 'window.workbench'; page?: 'chat' | 'settings' | 'workshop' }
   | { type: 'window.menu' }

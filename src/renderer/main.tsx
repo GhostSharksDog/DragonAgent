@@ -17,14 +17,15 @@ import { BubbleChat } from './BubbleChat';
 import { Composer } from './ComposerControls';
 import { Icon } from './Icons';
 import avatar from '../../assets/branding/dragon-avatar.png';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Action, AgentSession, ModelProfile, McpConfig, Snapshot, PendingRequest } from '../shared/contracts';
 import { contextPolicy, isBusy } from '../shared/contracts';
 import { Pet } from '../pet/renderer/Pet';
 import { SkinSprite } from '../pet/renderer/SkinSprite';
 import { BalanceBubble } from './BalanceBubble';
-import type { AppSnapshot } from '../pet/shared/types';
+import type { Activity, AppSnapshot } from '../pet/shared/types';
+import { validPetBehavior } from '../shared/pet-behavior';
 import './styles.css';
 import './chrome.css';
 import './workbench040.css';
@@ -38,11 +39,47 @@ document.body.dataset.view = view;
 import { TaskTree, CollaborationSettings } from './TaskTree';
 
 const labels: Record<string, string> = { paused: '额度已用完，等待继续', idle: '待开始', running: '执行中', waiting: '等待你确认', stopping: '正在停止', completed: '已完成', cancelled: '已停止', error: '执行失败', interrupted: '上次任务中断' };
+/** 刚完成/刚出错的动画窗口：只在这段时间内把会话状态当成一次性动作。 */
+const SHOT_MS = 8_000;
+/**
+ * 桌宠窗口没有单独的运行时快照，状态从工作台快照推导：
+ * 审批/提问优先，其次运行中（正在输出=说话），再是刚完成的一次性动作。
+ */
 function adapt(state: Snapshot): AppSnapshot {
-  const selected = state.sessions.find(s => s.id === state.petChat?.sessionId);
-  const busy = state.sessions.some(isBusy);
-  return { skin: state.skin, assistant: { activity: busy ? 'thinking' : 'idle', pending: selected?.pending ?? [], quota: state.quota }, bubbleMode: state.petView === 'hidden' ? 'hidden' : 'quick', quickView: state.petView === 'reply' ? 'chat' : state.petView, direction: 'right', motion: 'idle', animationStartedAt: state.animationStartedAt, settings: {}, version: state.version } as unknown as AppSnapshot;
+  const scoped = state.sessions.find(s => s.id === state.petChat?.sessionId) ?? state.sessions.find(s => s.id === state.selectedSessionId) ?? state.sessions[0];
+  const pending = scoped?.pending ?? [];
+  const lastReply = scoped?.messages.filter(m => m.role === 'assistant').at(-1);
+  const recent = scoped ? Date.now() - scoped.updatedAt < SHOT_MS : false;
+  const activity: Activity =
+    pending.some(r => r.kind === 'approval') ? 'awaiting-approval'
+    : pending.some(r => r.kind === 'question') ? 'awaiting-input'
+    : scoped && ['running', 'waiting', 'stopping'].includes(scoped.status) ? (scoped.status === 'running' && lastReply?.partial ? 'speaking' : 'thinking')
+    : scoped?.status === 'completed' && recent ? 'success'
+    : scoped?.status === 'error' && recent ? 'error'
+    : state.sessions.some(isBusy) ? 'thinking'
+    : 'idle';
+  return { skin: state.skin, assistant: { activity, pending: scoped?.pending ?? [], quota: state.quota }, bubbleMode: state.petView === 'hidden' ? 'hidden' : 'quick', quickView: state.petView === 'reply' ? 'chat' : state.petView, direction: 'right', motion: 'idle', animationStartedAt: state.animationStartedAt, settings: {}, petBehavior: validPetBehavior(state.settings.pet.behavior), version: state.version } as unknown as AppSnapshot;
 }
+/** 只比较桌宠外观/行为真正读取的字段，正文 token 变化不再重渲染整个 Pet。 */
+function samePetSnapshot(previous: { snapshot: AppSnapshot | null }, next: { snapshot: AppSnapshot | null }) {
+  if (previous.snapshot === next.snapshot) return true;
+  const before = previous.snapshot, after = next.snapshot;
+  if (!before || !after) return false;
+  return comparePetSnapshot(before, after);
+}
+function comparePetSnapshot(previous: AppSnapshot, next: AppSnapshot) {
+  return previous.assistant.activity === next.assistant.activity
+    && previous.motion === next.motion
+    && previous.direction === next.direction
+    && previous.animationStartedAt === next.animationStartedAt
+    && previous.bubbleMode === next.bubbleMode
+    && previous.quickView === next.quickView
+    && previous.skin?.baseUrl === next.skin?.baseUrl
+    && JSON.stringify(previous.skin?.manifest) === JSON.stringify(next.skin?.manifest)
+    && JSON.stringify(previous.petBehavior) === JSON.stringify(next.petBehavior)
+    && JSON.stringify(previous.rigPlayback) === JSON.stringify(next.rigPlayback);
+}
+const PetWindow = React.memo(Pet, samePetSnapshot);
 function Text({ text }: { text: string }) { return <RichText text={text}/>; }
 function Request({request,act}:{request:PendingRequest;act(a:Action):Promise<unknown>}) {return <ApprovalCard request={request} act={act}/>;}
 function Conversation({ session, act, compact = false }: { session: AgentSession; act(a: Action): Promise<unknown>; compact?: boolean }) { return <Timeline session={session} act={act} compact={compact} renderRequest={r=><Request request={r} act={act} key={r.id}/>}/>; }
@@ -74,7 +111,7 @@ function Workbench({ state, act }: { state: Snapshot; act(a: Action): Promise<un
   return <div className={`app-shell ${state.settings.layout?.leftCollapsed ? 'left-collapsed' : ''} ${state.settings.layout?.rightCollapsed !== false ? 'right-collapsed' : ''}${state.settings.wallpaper ? ' has-wallpaper' : ''}`}>{state.settings.wallpaper && <div className="wallpaper-layer" style={{ backgroundImage: 'url(' + wallpaperUrl(state.settings.wallpaper.file) + ')', opacity: 'var(--wallpaper-opacity)', filter: 'blur(var(--wallpaper-blur))' }}><i style={{ opacity: 'var(--wallpaper-dim)' }}/></div>}<div className="app-chrome"><button className="plain sidebar-toggle" aria-label={state.settings.layout?.leftCollapsed?'展开导航':'收起导航'} title="切换导航栏" onClick={()=>void act({type:'layout.save',leftCollapsed:!state.settings.layout?.leftCollapsed})}>☰</button><span className="chrome-name">DragonAgent</span></div><aside className="sidebar"><div className="brand"><img className="brand-avatar" src={avatar} alt="霜璃头像"/><div>DragonAgent<small>你的龙娘工作台</small></div></div><button className="new-chat" onClick={() => void create()}><Icon name="plus" size={18}/>新的对话<span>＋</span></button><div className="nav-label">工作空间</div><nav>{[['chat', 'chat', '对话与任务'], ['illustration', 'spark', '角色插画'], ['workshop', 'film', '外观工坊'], ['mcp', 'link', '工具连接'], ['memory', 'book', '记忆与历史']].map(([id, icon, title]) => <button className={page === id ? 'active' : ''} key={id} title={title} aria-label={title} onClick={() => setPage(id)}><Icon name={icon} size={18}/>{title}{id === 'mcp' && <span className="nav-count">{state.mcp.filter(m => m.state === 'connected').length}</span>}</button>)}</nav><div className="nav-label history-label">最近对话<span>{state.sessions.filter(s => !s.archived).length}</span></div><div className="history"><HistoryList sessions={state.sessions.filter(s => !s.archived)} selectedId={page === 'chat' ? s?.id : null} select={id => { void act({ type: 'session.select', id }); setPage('chat'); }} act={act} compact/>{!state.sessions.some(s => !s.archived) && <p className="history-empty">从第一段对话开始。</p>}</div><div className="sidebar-bottom"><button className={page === 'settings' ? 'active' : ''} title="设置" aria-label="设置" onClick={() => setPage('settings')}><Icon name="settings" size={20}/>设置</button><div className="runtime-state"><i className={state.backends.dragon.state === 'ready' ? 'online' : ''}/><span>{state.backends.dragon.state === 'ready' ? 'Dragon 已就绪' : '本地工作空间'}</span><small>v{state.version}</small></div></div></aside>
     <div className="main-area"><header className="topbar"><div><span className="breadcrumb">DragonAgent</span><span className="slash">/</span><strong>{page === 'chat' ? s?.title ?? '开始新的一天' : page === 'illustration' ? '角色插画' : page === 'workshop' ? '外观工坊' : page === 'mcp' ? '工具连接' : page === 'memory' ? '记忆与历史' : '设置'}</strong></div><button className="plain sidebar-toggle" aria-label={state.settings.layout?.rightCollapsed!==false?'展开侧栏':'收起侧栏'} title="切换右侧栏" onClick={()=>void act({type:'layout.save',rightCollapsed:state.settings.layout?.rightCollapsed===false})}>◧</button><button className={`summon ${state.settings.pet.visible ? 'selected' : ''}`} onClick={() => void act({ type: 'pet.toggle' })}><Icon name="spark" size={16}/>{state.settings.pet.visible ? '龙娘已在桌面' : '召唤龙娘'}<kbd>Ctrl Alt D</kbd></button></header>
       {page === 'illustration' ? <Illustration state={state} act={act} /> : page === 'workshop' ? <StudioPage state={state} act={act} /> : page !== 'chat' ? <Settings state={state} page={page} act={act} /> : !s ? <div className="welcome"><div className="welcome-art">{state.skin && <SkinSprite skin={state.skin} animationKey="idle" startedAt={state.animationStartedAt} width={270} height={280} />}<span className="orbit one">✦</span><span className="orbit two">✧</span></div><div className="eyebrow">A LITTLE MAGIC, REAL WORK.</div><h1>今天，想一起完成什么？</h1><p>从一个想法开始。查找资料、整理文件，或让龙娘陪你写点代码。</p><div className="starter-grid">{[['link', '探索一个问题', '搜索网页，梳理资料与来源', '帮我搜索并整理一个主题的资料：'], ['folder', '整理我的工作', '从选定文件夹开始，逐步完成', '帮我整理工作文件夹，先提出一个方案：'], ['spark', '一起创造点什么', '把想法变成代码或一份文档', '我想用 TypeScript 做一个项目：']].map(([icon, title, caption, text]) => <button className="starter" key={title} onClick={() => void create(text)}><Icon name={icon} /><strong>{title}</strong><span>{caption}</span><b>↗</b></button>)}</div><button className="primary start-button" onClick={() => void create()}>开始对话<span>→</span></button><div className="welcome-foot">一份任务 · 两种陪伴方式 · 对话保存在本机</div></div> : <div className="workspace"><div className="chat-column"><div className="session-bar"><span className="tag">{s.backend === 'dragon' ? 'Dragon 自研内核' : 'Codex'}</span><span>{s.backend === 'codex' ? `${s.model ?? '账号默认模型'}${s.reasoningEffort ? ' · ' + s.reasoningEffort : ''}` : state.settings.profiles.find(p => p.id === s.profileId)?.model ?? '未配置模型'}</span><span className={`status ${s.status}`}>{labels[s.status]}</span><button className="plain" onClick={() => { setOrigins(s.origins.join('\n')); setPermissions(!permissions); }}>权限与目录</button></div>{permissions && <div className="permission-panel"><div className="section-title"><strong>本会话权限</strong><button className="plain" onClick={() => setPermissions(false)}>关闭</button></div><p className="hint">{s.workspace || '尚未选择文件夹'}</p><button onClick={() => void act({ type: 'session.workspace', id: s.id })}>选择工作文件夹</button><label>允许访问的网站（每行一个）<textarea rows={2} value={origins} onChange={e => setOrigins(e.target.value)} /></label><label className="check"><input type="checkbox" checked={s.browserInput} disabled={isBusy(s)} onChange={e => void act({ type: 'session.permissions', id: s.id, origins: origins.split('\n').filter(Boolean), browserInput: e.target.checked, terminalEnabled: s.terminalEnabled })} />允许在获准网站填写内容</label><label className="check"><input type="checkbox" checked={s.terminalEnabled} disabled={isBusy(s)} onChange={e => void act({ type: 'session.permissions', id: s.id, origins: origins.split('\n').filter(Boolean), browserInput: s.browserInput, terminalEnabled: e.target.checked })} />启用命令执行（按当前权限等级审批）</label><button disabled={isBusy(s)} onClick={() => void act({ type: 'session.permissions', id: s.id, origins: origins.split('\n').filter(Boolean), browserInput: s.browserInput, terminalEnabled: s.terminalEnabled })}>保存网站范围</button></div>}{s.messages.length ? <Conversation session={s} act={act} /> : <div className="empty-chat"><Icon name="spark" size={28} /><h2>龙娘准备好了</h2><p>说说你想做的事。需要文件时，可先选择工作文件夹。</p></div>}
-        <div className="composer-wrap">
+        <div className="composer-wrap" data-session-id={s.id}>
                 <Composer
           session={s}
           sessions={state.sessions}
@@ -92,19 +129,36 @@ function Workbench({ state, act }: { state: Snapshot; act(a: Action): Promise<un
       </div><aside className="inspector"><ResultPanel state={state} session={s} act={act} /></aside></div>}
     </div></div>;
 }
+function PetBubble({ state, act }: { state: Snapshot; act(action: Action): Promise<unknown> }) {
+  const quota = state.petView === 'quota';
+  const simple = !quota && state.settings.pet.chatMode !== 'detailed';
+  const layout = simple ? state.compactBubbleLayout : undefined;
+  const body = layout?.body;
+  const contentStyle = layout && body ? {
+    left: `${body.x / layout.width * 100}%`, top: `${body.y / layout.height * 100}%`,
+    width: `${body.width / layout.width * 100}%`, height: `${body.height / layout.height * 100}%`,
+  } : undefined;
+  return <div className={`bubble-shell${simple ? ' simple-bubble' : ''}${layout ? ' compact-bubble' : ''}`} data-tail-edge={layout?.tailEdge}>
+    {layout && <svg className="compact-bubble-outline" viewBox={`0 0 ${layout.width} ${layout.height}`} preserveAspectRatio="none" aria-hidden="true">
+      <path d={layout.outline} strokeWidth="3" strokeLinejoin="round" />
+    </svg>}
+    {quota ? <BalanceBubble state={state} act={act}/> : <div className="bubble-chat-body" style={contentStyle}><BubbleChat state={state} act={act}/></div>}
+  </div>;
+}
 function App() {
   const [state, setState] = useState<Snapshot | null>(null), [error, setError] = useState('');
   const kind = view;
-  useEffect(()=>{if(kind!=='bubble')return;const close=(e:KeyboardEvent)=>{if(e.key==='Escape'){e.preventDefault();void window.dragon.action({type:'pet.view',view:'hidden'});}};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close);},[]);
+  useEffect(()=>{if(kind!=='bubble')return;const close=(e:KeyboardEvent)=>{if(e.key==='Escape'&&!e.isComposing&&e.keyCode!==229){e.preventDefault();void window.dragon.action({type:'pet.view',view:'hidden'});}};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close);},[]);
   useEffect(() => { document.body.dataset.view = kind; let revision = -1; const update = (value: Snapshot) => { if (value.revision >= revision) { revision = value.revision; setState(value); } }; const off = window.dragon.subscribe(update); void window.dragon.snapshot().then(update).catch(e => setError(e.message)); return off; }, []);
   useEffect(() => { if (state) document.documentElement.dataset.theme = state.resolvedTheme; }, [state?.resolvedTheme]);
   useEffect(()=>{if(!state)return;applyAppearance(state.settings.appearance??{},state.settings.wallpaper);const preview=(event:Event)=>{const detail=(event as CustomEvent).detail;applyAppearance(detail.values,detail.wallpaper);};window.addEventListener('appearance-preview',preview);return()=>window.removeEventListener('appearance-preview',preview);},[state?.settings.appearance,state?.settings.wallpaper]);
   useEffect(() => { if (state) document.documentElement.dataset.accent = state.settings.accent ?? 'violet'; }, [state?.settings.accent]);
-  const act = async (action: Action) => { try { const result = await window.dragon.action(action); setError(''); return result; } catch (e) { setError((e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); return undefined; } };
+  // 稳定 act 身份，让历史消息里的 RichText 可以跳过重复的 Markdown 解析。
+  const act = useCallback(async (action: Action) => { try { const result = await window.dragon.action(action); setError(''); return result; } catch (e) { setError((e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); return undefined; } }, []);
   if (!state) return <div className="loading">{error || '龙娘正在准备工作空间…'}</div>;
   const s = state.sessions.find(s => s.id === (kind === 'bubble' ? state.petChat?.sessionId : state.selectedSessionId));
-  if (kind === 'pet') return <Pet snapshot={adapt(state)}/>;
-  return <>{kind === 'bubble' ? <div className={`bubble-shell ${state.petView !== 'quota' && state.settings.pet.chatMode !== 'detailed' ? 'simple-bubble' : ''}`}>{state.petView === 'quota' ? <BalanceBubble state={state} act={act}/> : <BubbleChat state={state} act={act}/>}</div> : <Workbench state={state} act={act}/ >}{error && <div className="toast" role="alert"><span>{error}</span><button onClick={() => setError('')}>×</button></div>}</>;
+  if (kind === 'pet') return <PetWindow snapshot={adapt(state)}/>;
+  return <>{kind === 'bubble' ? <PetBubble state={state} act={act}/> : <Workbench state={state} act={act}/ >}{error && <div className="toast" role="alert"><span>{error}</span><button onClick={() => setError('')}>×</button></div>}</>;
 }
 // Files dropped outside the composer must not navigate this window away.
 for (const type of ['dragover', 'drop'] as const) window.addEventListener(type, event => { if (event.dataTransfer?.types.includes('Files')) event.preventDefault(); });

@@ -74,8 +74,23 @@ try {
   await page.locator('.composer textarea').fill('请制定计划：整理工作目录');
   await page.keyboard.press('Enter');
   await waitFor(async () => (await session(id)).plans?.length === 1, '计划提交');
-  await page.locator('.dragon-plan-card').waitFor();
+  await page.locator('.conversation .dragon-plan-card').waitFor();
+  assert.equal(await page.locator('.plan-banner').count(), 0, '计划不应再占用对话上方的独立摘要条');
+  const afterAssistant = await page.locator('.conversation > .timeline-entry').evaluateAll(entries => {
+    let seenAssistant = false;
+    for (const entry of entries) {
+      if (entry.querySelector('.message.assistant')) seenAssistant = true;
+      if (entry.querySelector('.dragon-plan-card')) return seenAssistant;
+    }
+    return false;
+  });
+  assert(afterAssistant, '计划卡片应排在本轮回答之后');
+  assert.ok((await page.locator('.app-shell').getAttribute('class') ?? '').includes('right-collapsed'), '提交计划不应自动打开右侧栏');
   await page.screenshot({ path: 'test-results/planning-card.png' });
+  await page.locator('.dragon-plan-card .dragon-plan-icon[aria-label="在右侧查看完整计划"]').click();
+  await page.locator('.plan-inspector').waitFor();
+  assert.ok((await page.locator('.app-shell').getAttribute('class') ?? '').includes('right-collapsed') === false, '点击计划卡片应展开右侧栏');
+  report.checks.push('计划以回答流内嵌卡片显示，点击卡片可展开右侧完整计划');
   const planRequest = requests.find(r => r.planMode && !r.toolDone);
   assert(planRequest, '缺少计划模式请求');
   assert.ok(planRequest.tools.includes('plan_submit'), '计划模式应暴露 plan_submit');
@@ -84,7 +99,7 @@ try {
   report.checks.push('计划模式只暴露只读工具与 plan_submit，隐藏终端/写入工具');
 
   // 确认执行，并检查执行请求的系统提示与工具已解除计划限制。
-  await page.getByRole('button', { name: '按此计划执行' }).click();
+  await page.locator('.dragon-plan-card').getByRole('button', { name: '按此计划执行' }).click();
   await waitFor(async () => (await session(id)).mode === 'execute', '进入执行模式');
   await waitFor(async () => ['completed', 'error', 'cancelled'].includes((await session(id)).status), '执行结束');
   const executed = await session(id);
@@ -134,6 +149,7 @@ try {
 
   // 计划模式只对下一轮生效：提交计划后不执行，直接再发一条普通消息，必须回到执行模式。
   const id2 = await act({ type: 'session.create', backend: 'dragon', profileId: 'plan' });
+  await page.locator('.composer-wrap[data-session-id="' + id2 + '"]').waitFor();
   await act({ type: 'session.mode', id: id2, mode: 'plan' });
   await page.locator('.composer textarea').fill('请制定计划：整理工作目录');
   await page.keyboard.press('Enter');
@@ -151,6 +167,7 @@ try {
 
   // 用户明确写“先制定计划再执行”时，即使未点开关，本轮也进入计划模式。
   const id3 = await act({ type: 'session.create', backend: 'dragon', profileId: 'plan' });
+  await page.locator('.composer-wrap[data-session-id="' + id3 + '"]').waitFor();
   await page.locator('.composer textarea').fill('请先制定计划，再执行：整理工作目录');
   await page.keyboard.press('Enter');
   await waitFor(async () => (await session(id3)).plans?.length === 1, '提示词触发的计划');

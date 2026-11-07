@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { SkinData } from '../shared/types';
+import { videoNeedsFlip } from '../shared/video';
 
 interface VideoSpriteProps {
   skin: SkinData;
@@ -11,6 +12,8 @@ interface VideoSpriteProps {
   onEnded?: () => void;
   /** 额外水平镜像，用于「看向鼠标」；和素材自身的 flipX 取异或。 */
   mirror?: boolean;
+  /** Playback speed multiplier for idle and manual running. */
+  playbackRate?: number;
 }
 
 /** video 只解码不出图，画面统一画到 canvas 上。 */
@@ -36,7 +39,7 @@ const decodeOnly: React.CSSProperties = {
  * 播放被拒（窗口还没显示、被遮挡、系统省电）只算「稍后再试」，不能当成素材损坏，
  * 否则一次时机不对就会把整只宠物换成蛋。只有解码真的报错才交给 onError。
  */
-export function VideoSprite({ skin, animationKey, width, height, mirror = false, onError, onEnded }: VideoSpriteProps) {
+export function VideoSprite({ skin, animationKey, width, height, mirror = false, playbackRate = 1, onError, onEnded }: VideoSpriteProps) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const host = useRef<HTMLDivElement>(null);
   const slots = useRef<(HTMLVideoElement | null)[]>([]);
@@ -49,7 +52,9 @@ export function VideoSprite({ skin, animationKey, width, height, mirror = false,
   const manifest = skin.manifest;
   const videos = manifest.videos ?? {};
   const video = videos[animationKey] ?? videos.idle;
+  const flip = videoNeedsFlip(video?.flipX, mirror);
   const base = skin.baseUrl.endsWith('/') ? skin.baseUrl : `${skin.baseUrl}/`;
+  const rate = Math.max(0.5, Math.min(2, Number.isFinite(playbackRate) ? playbackRate : 1));
   // 画布四周常有大量空白，按 content 裁切后再缩放，窗口才能贴合角色本体。
   const content = manifest.content ?? { x: 0, y: 0, width: manifest.width, height: manifest.height };
   const contentRef = useRef(content);
@@ -63,18 +68,43 @@ export function VideoSprite({ skin, animationKey, width, height, mirror = false,
   };
 
   // 逐帧把当前前台的 video 画进 canvas，只在画面真的变了的时候重绘。
+  // 优先跟随视频帧回调（通常 24–30fps），避免桌宠空闲时仍以显示器刷新率空转。
   useEffect(() => {
     const target = canvas.current;
     const context = target?.getContext('2d');
     if (!target || !context) return;
-    let frame = 0, lastKey = '';
+    let frame = 0, videoFrame = 0, retryTimer = 0, stopped = false, lastKey = '';
+    let videoSource: HTMLVideoElement | null = null;
+    const currentVideo = () => slots.current[front.current];
+    const cancel = () => {
+      if (frame) { cancelAnimationFrame(frame); frame = 0; }
+      if (retryTimer) { clearTimeout(retryTimer); retryTimer = 0; }
+      if (videoFrame && videoSource?.cancelVideoFrameCallback) {
+        videoSource.cancelVideoFrameCallback(videoFrame);
+        videoFrame = 0;
+      }
+    };
+    const schedule = () => {
+      if (stopped || document.visibilityState === 'hidden' || frame || videoFrame || retryTimer) return;
+      const current = currentVideo();
+      if (!current || current.readyState < 2) {
+        // 视频刚开始加载时帧回调还没注册，先低频重试，避免第一帧永远不出现。
+        retryTimer = window.setTimeout(() => { retryTimer = 0; paint(); }, 100);
+      } else if ('requestVideoFrameCallback' in current) {
+        videoSource = current;
+        videoFrame = current.requestVideoFrameCallback(() => { videoFrame = 0; paint(); });
+      } else {
+        frame = requestAnimationFrame(paint);
+      }
+    };
     const paint = () => {
-      const source = slots.current[front.current];
+      if (stopped) return;
+      const source = currentVideo();
       const fade = fadeRef.current;
       const elapsed = fade ? performance.now() - fade.start : Infinity;
       const fading = !!fade && elapsed < FADE_MS;
       if (source && source.readyState >= 2 && source.videoWidth) {
-        const key = `${source.src}#${source.currentTime}`;
+        const key = source.src + '#' + source.currentTime;
         if (key !== lastKey || fading) {
           lastKey = key;
           const area = contentRef.current;
@@ -84,7 +114,10 @@ export function VideoSprite({ skin, animationKey, width, height, mirror = false,
           }
           context.clearRect(0, 0, area.width, area.height);
           context.drawImage(source, area.x, area.y, area.width, area.height, 0, 0, area.width, area.height);
-          if (host.current && host.current.dataset.ready !== 'true') host.current.dataset.ready = 'true';
+          if (host.current) {
+            host.current.dataset.ready = 'true';
+            host.current.dataset.paints = String(Number(host.current.dataset.paints ?? 0) + 1);
+          }
           if (fading && fade) {
             // 旧姿势盖在新姿势上淡出，动作衔接看起来像过渡而不是跳帧。
             context.globalAlpha = Math.max(0, 1 - elapsed / FADE_MS);
@@ -93,10 +126,20 @@ export function VideoSprite({ skin, animationKey, width, height, mirror = false,
           } else if (fade) fadeRef.current = null;
         }
       }
-      frame = requestAnimationFrame(paint);
+      schedule();
     };
-    frame = requestAnimationFrame(paint);
-    return () => cancelAnimationFrame(frame);
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') { cancel(); return; }
+      lastKey = '';
+      schedule();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    paint();
+    return () => {
+      stopped = true;
+      document.removeEventListener('visibilitychange', onVisibility);
+      cancel();
+    };
   }, []);
 
   useEffect(() => {
@@ -111,6 +154,7 @@ export function VideoSprite({ skin, animationKey, width, height, mirror = false,
     currentFile.current = url;
     target.dataset.file = url;
     target.loop = loop;
+    target.playbackRate = rate;
 
     // 解码真的失败才值得报错；自动播放被拒只是时机问题。
     const onDecodeError = () => onError?.(`宠物动画加载失败：${video.file}`);
@@ -168,6 +212,11 @@ export function VideoSprite({ skin, animationKey, width, height, mirror = false,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [base, video?.file, video?.loop, width, height]);
 
+  // Apply a speed change to the currently playing slots immediately.
+  useEffect(() => {
+    for (const element of slots.current) if (element) element.playbackRate = rate;
+  }, [rate]);
+
   // 窗口重新可见时补一次播放，避免被遮挡期间彻底停住。
   useEffect(() => {
     const resume = () => {
@@ -183,8 +232,8 @@ export function VideoSprite({ skin, animationKey, width, height, mirror = false,
   }, []);
 
   if (!video) return null;
-  return <div ref={host} className="sprite-canvas video-canvas" data-ready="false">
-    <div className="video-frame" style={{ position: 'absolute', ...box, transform: video.flipX !== mirror ? 'scaleX(-1)' : undefined }}>
+  return <div ref={host} className="sprite-canvas video-canvas" data-ready="false" data-animation={animationKey} data-file={video.file}>
+    <div className="video-frame" data-flipx={flip ? 'true' : 'false'} style={{ position: 'absolute', ...box, transform: flip ? 'scaleX(-1)' : undefined }}>
       <canvas ref={canvas} style={{ display: 'block', width: '100%', height: '100%' }} />
       <video ref={element => { slots.current[0] = element; }} muted playsInline preload="auto" style={decodeOnly} />
       <video ref={element => { slots.current[1] = element; }} muted playsInline preload="auto" style={decodeOnly} />

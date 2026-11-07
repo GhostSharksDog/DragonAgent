@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { realpath } from 'node:fs/promises';
 import { contextComposition, contextBudget, estimateTokens, historyGroups, repairInterruptedCalls } from './context.js';
-import { ModelHttpError } from './adapters/http.js';
+import { ModelHttpError, ModelStreamError } from './adapters/http.js';
 import { BudgetExceeded, DEFAULT_LIMITS, type AgentEvent, type AgentRecord, type Grant, type Limits, type Message, type ModelProfile, type ModelResponse, type RuntimeOptions, type ToolCall, type ToolContext, type ToolResult } from './types.js';
 
 type Node = { agent: AgentRecord; controller: AbortController; done: Promise<void>; inbox: string[]; reported?: string; repeated?: {key:string; count:number}; callId?: string };
@@ -163,8 +163,9 @@ export class AgentRuntime {
         await this.event(node.agent, { type: 'usage', usage: structuredClone(node.agent.usage) }); return result;
       } catch (error) {
         await this.event(node.agent, { type: 'request', attempt: { ...attempt, status: 'failed', finishedAt: Date.now(), error: (error as Error).message } });
-        // Only retry HTTP failures before any stream/tool execution. Never replay a partial stream.
-        if (!(error instanceof ModelHttpError) || !error.retryable || attempts++ >= 2 || node.controller.signal.aborted) throw error;
+        // HTTP 失败可重试；流中断只在尚未产生文本/工具调用时才安全重放，绝不重放已有输出。
+        const retryable = error instanceof ModelHttpError ? error.retryable : error instanceof ModelStreamError ? error.retryable && error.safeToRetry : false;
+        if (!retryable || attempts++ >= 2 || node.controller.signal.aborted) throw error;
         await new Promise<void>((resolve, reject) => { const signal = node.controller.signal; const abort = () => { clearTimeout(timer); reject(signal.reason); }; const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve(); }, attempts * 500); signal.addEventListener('abort', abort, { once: true }); });
       }
     }

@@ -27,6 +27,7 @@ export function RigCanvas({ skin, playback, width, height, view, className, onRe
     const context = element.getContext('2d', { alpha: true });
     if (!context) { latest.current.onError?.('无法启动角色画布。'); return; }
     let cancelled = false, scheduled = 0;
+    let visibilityHandler: (() => void) | undefined;
     const textures = new Map<string, HTMLImageElement>();
     void Promise.all(rigFiles(rig).map(async file => {
       const image = new Image(); image.src = new URL(file, skin.baseUrl.endsWith('/') ? skin.baseUrl : `${skin.baseUrl}/`).href;
@@ -51,11 +52,17 @@ export function RigCanvas({ skin, playback, width, height, view, className, onRe
         element.dataset.rigTime = String(Math.max(0, now - current.playback.startedAt));
         element.dataset.rigRenderCount = String(++renderCount.current);
         element.dataset.rigReady = 'true';
-        scheduled = window.requestAnimationFrame(render);
+        // 骨骼姿势不依赖显示器刷新率；30fps 足够，隐藏时完全停掉。
+        scheduled = window.setTimeout(render, 33);
       };
+      visibilityHandler = () => {
+        if (document.visibilityState === 'hidden') { window.clearTimeout(scheduled); scheduled = 0; return; }
+        if (!scheduled) render();
+      };
+      document.addEventListener('visibilitychange', visibilityHandler);
       render();
     }).catch(error => { if (!cancelled) latest.current.onError?.(`角色部件加载失败：${error instanceof Error ? error.message : String(error)}`); });
-    return () => { cancelled = true; window.cancelAnimationFrame(scheduled); for (const image of textures.values()) image.src = ''; };
+    return () => { cancelled = true; window.clearTimeout(scheduled); if (visibilityHandler) document.removeEventListener('visibilitychange', visibilityHandler); for (const image of textures.values()) image.src = ''; };
   }, [signature]);
   return <canvas ref={canvas} className={['rig-canvas', className].filter(Boolean).join(' ')} role="img" aria-label={skin.manifest.name} style={{ position: 'absolute', inset: 0, width, height, pointerEvents: 'none' }} />;
 }

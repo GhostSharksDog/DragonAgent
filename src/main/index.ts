@@ -16,6 +16,7 @@ import { Runtime } from './runtime';
 import { loadSkin } from '../pet/main/skin';
 import type { Action } from '../shared/contracts';
 import { isBusy } from '../shared/contracts';
+import { placeCompactBubble, type BubbleRect } from '../shared/compact-bubble';
 import { WorkshopManager } from './workshop/manager';
 import { copyFile, readFile } from 'node:fs/promises';
 import type { WorkshopAction } from '../shared/workshop';
@@ -37,12 +38,12 @@ const PET_WIDTH = 112, PET_HEIGHT = 130;
 function createWindow(kind: 'workbench' | 'pet' | 'bubble') {
   const transparent = kind !== 'workbench';
   const theme = runtime.view.resolvedTheme, colors = theme === 'dark' ? { background: '#1e1b25', symbol: '#e4ddef' } : { background: '#f6f7f9', symbol: '#20242e' };
-  const win = new BrowserWindow({ ...(transparent ? {} : { titleBarStyle: 'hidden' as const, titleBarOverlay: { color: runtime.state.settings.wallpaper ? '#00000000' : colors.background, symbolColor: colors.symbol, height: 36 } }), icon: path.join(branding, 'dragon.ico'), width: kind === 'workbench' ? 1260 : kind === 'pet' ? PET_WIDTH : 390, height: kind === 'workbench' ? 850 : kind === 'pet' ? PET_HEIGHT : 460, minWidth: kind === 'workbench' ? 850 : undefined, minHeight: kind === 'workbench' ? 600 : undefined, title: 'DragonAgent', show: false, frame: !transparent, transparent, backgroundColor: transparent ? '#00000000' : colors.background, resizable: !transparent, hasShadow: !transparent, skipTaskbar: transparent, alwaysOnTop: transparent, autoHideMenuBar: true, webPreferences: { preload: path.join(root, 'main/preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true } });
+  const win = new BrowserWindow({ ...(transparent ? {} : { titleBarStyle: 'hidden' as const, titleBarOverlay: { color: runtime.state.settings.wallpaper ? '#00000000' : colors.background, symbolColor: colors.symbol, height: 36 } }), icon: path.join(branding, 'dragon.ico'), width: kind === 'workbench' ? 1260 : kind === 'pet' ? PET_WIDTH : 390, height: kind === 'workbench' ? 850 : kind === 'pet' ? PET_HEIGHT : 460, minWidth: kind === 'workbench' ? 850 : undefined, minHeight: kind === 'workbench' ? 600 : undefined, title: 'DragonAgent', show: false, frame: !transparent, transparent, backgroundColor: transparent ? '#00000000' : colors.background, resizable: !transparent, hasShadow: !transparent, skipTaskbar: transparent, alwaysOnTop: transparent, autoHideMenuBar: true, webPreferences: { preload: path.join(root, 'main/preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, backgroundThrottling: kind !== 'pet' } });
   windows.add(win); win.on('closed', () => windows.delete(win));
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
   win.webContents.on('will-frame-navigate', event => { if (!event.isMainFrame && !event.url.startsWith('artifact:')) event.preventDefault(); });
-  void win.loadFile(path.join(root, 'renderer/index.html'), { query: { view: kind, theme } });
+  void win.loadFile(path.join(root, 'renderer/index.html'), { query: { view: kind, theme, ...(kind === 'pet' && process.env.DRAGON_PET_SLEEP_MS ? { sleepAfter: process.env.DRAGON_PET_SLEEP_MS } : {}), ...(kind === 'pet' && process.env.DRAGON_PET_ROAM_MS ? { roamAfter: process.env.DRAGON_PET_ROAM_MS } : {}), ...(kind === 'pet' && process.env.DRAGON_PET_ROAM_GAP_MS ? { roamGap: process.env.DRAGON_PET_ROAM_GAP_MS } : {}) } });
   return win;
 }
 let studio:StudioManager;
@@ -66,31 +67,66 @@ function syncWorkshop() {
   runtime.view.workshop = { ...workshop.snapshot(), civitaiKeySaved: runtime.secrets.has('workshop:civitai') };
   runtime.changed(false);
 }
-function moveBubble() {
-  if (!pet || pet.isDestroyed() || !bubble || bubble.isDestroyed() || quitting) return;
-  const r = pet.getBounds(), area = screen.getDisplayMatching(r).workArea;
-  const b = bubble.getBounds();
-  // 气泡挂在鱼头正上方，底部尖角落在头顶；上方放不下时退到脚下。
-  const centered = Math.round(r.x + r.width / 2 - b.width / 2);
-  const x = Math.max(area.x + 6, Math.min(area.x + area.width - b.width - 6, centered));
-  const above = Math.round(r.y - b.height + 22);
-  const y = above >= area.y + 6 ? above : Math.round(Math.min(area.y + area.height - b.height - 6, r.y + r.height - 8));
-  bubble.setPosition(x, y);
+function isCompactBubble() {
+  const { petView } = runtime.view;
+  return (petView === 'reply' || petView === 'compose') && runtime.state.settings.pet.chatMode !== 'detailed';
 }
-function syncWindows() {
+function applyBubbleBounds(next: BubbleRect) {
+  const current = bubble.getBounds();
+  if (next.width !== current.width || next.height !== current.height) {
+    // Windows locks min/max bounds on non-resizable windows.
+    bubble.setResizable(true);
+    try { bubble.setBounds(next); } finally { bubble.setResizable(false); }
+  } else if (next.x !== current.x || next.y !== current.y) {
+    bubble.setPosition(next.x, next.y);
+  }
+}
+function moveBubble(): boolean {
+  if (!pet || pet.isDestroyed() || !bubble || bubble.isDestroyed() || quitting) return false;
+  if (runtime.view.petView === 'hidden') return false;
+  const r = pet.getBounds(), area = screen.getDisplayMatching(r).workArea;
+  const previous = runtime.view.compactBubbleLayout;
+  if (isCompactBubble()) {
+    const { bounds, layout } = placeCompactBubble(r, area);
+    applyBubbleBounds(bounds);
+    if (previous?.outline === layout.outline && previous.width === layout.width && previous.height === layout.height) return false;
+    runtime.view.compactBubbleLayout = layout;
+    return true;
+  }
+
+  const quota = runtime.view.petView === 'quota';
+  const width = quota ? 340 : 300, height = quota ? 420 : 100;
+  const centered = Math.round(r.x + r.width / 2 - width / 2);
+  const x = Math.max(area.x + 6, Math.min(area.x + area.width - width - 6, centered));
+  const above = Math.round(r.y - height + 22);
+  const y = above >= area.y + 6 ? above : Math.round(Math.min(area.y + area.height - height - 6, r.y + r.height - 8));
+  applyBubbleBounds({ x, y, width, height });
+  runtime.view.compactBubbleLayout = undefined;
+  return previous !== undefined;
+}
+function refreshBubblePosition() {
+  if (bubble && !bubble.isDestroyed() && bubble.isVisible() && moveBubble()) runtime.changed(false);
+}
+function syncWindows(viewChanged = false) {
   if (!pet || pet.isDestroyed() || !bubble || bubble.isDestroyed() || quitting) return;
   const config = runtime.state.settings.pet;
   const size = Math.round(PET_WIDTH * config.scale), height = Math.round(PET_HEIGHT * config.scale);
-  if (pet.getBounds().width !== size) pet.setSize(size, height);
+  const petBounds = pet.getBounds();
+  if (petBounds.width !== size || petBounds.height !== height) pet.setSize(size, height);
   pet.setAlwaysOnTop(config.alwaysOnTop, 'floating'); bubble.setAlwaysOnTop(config.alwaysOnTop, 'floating');
+  const showingBubble = runtime.view.petView !== 'hidden' && (config.visible || (viewChanged && runtime.view.petView === 'compose'));
+  // Dragging the pet while the compact chat is open should not activate its window.
+  const petFocusable = !showingBubble || !isCompactBubble();
+  if (pet.isFocusable() !== petFocusable) pet.setFocusable(petFocusable);
   if (config.visible) pet.showInactive(); else pet.hide();
-  const quota = runtime.view.petView === 'quota', wantWidth = quota ? 340 : 300, wantHeight = quota ? 420 : 100;
-  if (bubble.getBounds().height !== wantHeight || bubble.getBounds().width !== wantWidth) {
-    // Windows locks min/max bounds on non-resizable windows; unlock only for this programmatic resize.
-    bubble.setResizable(true); bubble.setSize(wantWidth, wantHeight); bubble.setResizable(false);
-  }
-  moveBubble();
-  if (config.visible && runtime.view.petView !== 'hidden') bubble.showInactive(); else bubble.hide();
+  const layoutChanged = showingBubble && moveBubble();
+  if (viewChanged || layoutChanged) runtime.changed(false);
+  if (showingBubble) bubble.showInactive(); else bubble.hide();
+}
+function showPetView(view: typeof runtime.view.petView) {
+  runtime.view.petView = view;
+  syncWindows(true);
+  if (bubble.isVisible() && (view === 'compose' || (view === 'reply' && isCompactBubble()))) bubble.focus();
 }
 function prepareWorkbench() {
   const win = createWindow('workbench');
@@ -105,7 +141,7 @@ function showWorkbench() {
   workbench.show(); if (workbench.isMinimized()) workbench.restore(); workbench.focus();
 }
 function togglePet() { runtime.state.settings.pet.visible = !runtime.state.settings.pet.visible; runtime.changed(); syncWindows(); }
-function menu() { Menu.buildFromTemplate([{ label: '打开 DragonAgent', click: showWorkbench }, { label: '说点什么…', click: () => { runtime.view.petView = 'compose'; runtime.changed(false); syncWindows(); bubble.show(); bubble.focus(); } }, { label: runtime.state.settings.pet.visible ? '收起龙娘' : '召唤龙娘', click: togglePet }, { type: 'separator' }, { label: '退出', click: () => app.quit() }]).popup(); }
+function menu() { Menu.buildFromTemplate([{ label: '打开 DragonAgent', click: showWorkbench }, { label: '说点什么…', click: () => showPetView('compose') }, { label: runtime.state.settings.pet.visible ? '收起龙娘' : '召唤龙娘', click: togglePet }, { type: 'separator' }, { label: '退出', click: () => app.quit() }]).popup(); }
 async function action(value: Action) {
   if (!value || typeof value !== 'object' || typeof value.type !== 'string') throw new Error('无效操作。');
   if(value.type==='window.exit'){app.quit();return;}
@@ -155,14 +191,15 @@ async function action(value: Action) {
     case 'window.menu': menu(); return;
     case 'external.open': return open(value.url);
     case 'pet.toggle': togglePet(); return;
-    case 'pet.view': runtime.view.petView = value.view; runtime.changed(false); syncWindows(); if (value.view === 'compose') { bubble.show(); bubble.focus(); } if (value.view === 'quota') void runtime.codex.quota().catch(() => undefined); return;
+    case 'pet.view': showPetView(value.view); if (value.view === 'quota') void runtime.codex.quota().catch(() => undefined); return;
     case 'pet.drag': {
       if (!Number.isFinite(value.dx) || !Number.isFinite(value.dy)) return;
       const b = pet.getBounds(), area = screen.getDisplayMatching(b).workArea;
       const x = Math.round(Math.max(area.x, Math.min(area.x + area.width - b.width, b.x + value.dx))), y = Math.round(Math.max(area.y, Math.min(area.y + area.height - b.height, b.y + value.dy)));
       // 拖动中只挪窗口；落盘和全量广播等停手后一次性做，否则每帧一次快照会卡。
-      pet.setPosition(x, y);
       petDragging = true;
+      pet.setPosition(x, y);
+      if (isCompactBubble()) refreshBubblePosition();
       pendingPet = { x, y };
       if (petDragTimer) clearTimeout(petDragTimer);
       petDragTimer = setTimeout(() => { petDragTimer = undefined; petDragging = false; if (!pendingPet) return; runtime.state.settings.pet.x = pendingPet.x; runtime.state.settings.pet.y = pendingPet.y; moveBubble(); runtime.changed(); }, 160);
@@ -251,8 +288,12 @@ else {
     }
     const area = screen.getPrimaryDisplay().workArea, config = runtime.state.settings.pet;
     pet.setPosition(Math.round(Math.max(area.x, Math.min(config.x ?? area.x + area.width - PET_WIDTH - 28, area.x + area.width - PET_WIDTH))), Math.round(Math.max(area.y, Math.min(config.y ?? area.y + area.height - PET_HEIGHT - 24, area.y + area.height - PET_HEIGHT))));
-    pet.on('move', () => { if (!petDragging) moveBubble(); });
-    pet.once('ready-to-show', syncWindows);
+    pet.on('move', () => { if (!petDragging || isCompactBubble()) refreshBubblePosition(); });
+    pet.on('resize', refreshBubblePosition);
+    screen.on('display-metrics-changed', refreshBubblePosition);
+    screen.on('display-added', refreshBubblePosition);
+    screen.on('display-removed', refreshBubblePosition);
+    pet.once('ready-to-show', () => syncWindows());
     // 鼠标在窗口左右哪边，鱼就转过去看哪边；方向变了才发一次，避免无谓 IPC。
     let gaze: 'left' | 'right' | 'center' = 'center';
     const gazeTimer = setInterval(() => {
@@ -276,7 +317,28 @@ else {
   target?.flashFrame(true);
   setTimeout(() => { if (target && !target.isDestroyed()) target.flashFrame(false); }, 4000);
 });
-runtime.on('change', () => { syncTheme(); const state = runtime.snapshot(); for (const win of windows) if (!win.isDestroyed()) win.webContents.send('dragon:state', state); });
+let snapshotTimer: NodeJS.Timeout | undefined;
+const broadcastSnapshot = () => {
+  if (quitting) return;
+  syncTheme();
+  const state = runtime.snapshot();
+  const perf = (globalThis as any).__dragonPerf; if (perf) perf.broadcasts += 1;
+  for (const win of windows) if (!win.isDestroyed()) win.webContents.send('dragon:state', state);
+};
+runtime.on('change', () => {
+  if (process.env.DRAGON_PERF_BASELINE === '1') { broadcastSnapshot(); return; }
+  // 审批/提问需要立即反馈，不能被流式 token 的合并窗口拖慢；
+  // 这类交互频率很低，直接广播不会造成快照风暴。
+  if (runtime.state.sessions.some(session => session.pending.length)) {
+    if (snapshotTimer) { clearTimeout(snapshotTimer); snapshotTimer = undefined; }
+    broadcastSnapshot();
+    return;
+  }
+  // 流式 token 会高频触发 change；约 16fps 的全量 snapshot 足够阅读，
+  // 60ms 合并窗口避免每个 token 克隆并广播整棵状态树。
+  if (snapshotTimer) return;
+  snapshotTimer = setTimeout(() => { snapshotTimer = undefined; broadcastSnapshot(); }, 60);
+});
     const valid = (sender: Electron.WebContents) => [...windows].some(w => w.webContents === sender);
     ipcMain.handle('dragon:snapshot', event => { if (!valid(event.sender)) throw new Error('未知窗口。'); return runtime.snapshot(); });
     ipcMain.handle('dragon:action', (event, value: Action) => { if (!valid(event.sender)) throw new Error('未知窗口。'); return action(value); });

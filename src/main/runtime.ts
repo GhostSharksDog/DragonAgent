@@ -1,5 +1,5 @@
 import {DEFAULT_APPEARANCE,appearanceValues} from '../shared/appearance';
-import { planMarkdown, wantsPlan } from '../shared/planning';
+import { planMarkdown, wantsPlan, type PlanExecutionStatus } from '../shared/planning';
 import { illustrationDefinitions } from './illustration/tools';
 import { captureVersion, rememberVersion, applyVersion } from './versions';
 import {routeChat} from './chat-routing';
@@ -31,6 +31,7 @@ import { emptyQuota } from '../pet/main/agent/quota';
 import { sanitizeDiagnostic } from '../pet/main/agent/transport';
 import type { ToolOutput } from '../pet/shared/tools';
 import { validLimits } from '../../packages/agent-core/src/runtime';
+import { validPetBehavior } from '../shared/pet-behavior';
 import type { AgentRecord } from '../../packages/agent-core/src/types';
 
 export class Runtime extends EventEmitter {
@@ -51,15 +52,49 @@ export class Runtime extends EventEmitter {
   private loadingModels: Promise<void> | null = null;
   private routing = new Map<string,Promise<unknown>>();
   private petQueueArmed = new Set<string>();
+  private saveTimer: NodeJS.Timeout | undefined;
+  private savePending = false;
   constructor(readonly store: Store, readonly secrets: Secrets, readonly options: { home: string; version?: string; workerPath: string; open(url: string): Promise<void> }) {
     super(); this.state = store.load(); this.attachments = new Attachments(options.home);
+    if (process.env.DRAGON_PERF === '1') (globalThis as any).__dragonPerf = { changes: 0, saves: 0, broadcasts: 0, startedAt: Date.now() };
     this.view = { codexCatalog: { status: 'idle', models: [] }, resolvedTheme: this.state.settings.theme === 'dark' ? 'dark' : 'light', revision: 0, backends: { dragon: { state: 'stopped', message: 'Dragon 待连接' }, codex: { state: 'stopped', message: 'Codex 待连接' } }, mcp: [], quota: emptyQuota(), account: '尚未连接', skin: null, petView: 'hidden', animationStartedAt: Date.now(), version: options.version ?? packageInfo.version };
     this.dragon = new DragonBackend({ home: options.home, workerPath: options.workerPath, settings: () => this.state.settings, key: id => secrets.get(id), definitions: () => [{ name: 'pet_task_scope', description: '查看当前 Agent 的授权范围。', inputSchema: { type: 'object', properties: {} } }, attachmentDefinition, artifactDefinition, ...memoryDefinitions, ...illustrationDefinitions, ...fileDefinitions, ...browserDefinitions, { name: 'pet_terminal', description: '执行 PowerShell 命令，审批方式由当前会话权限等级决定。', inputSchema: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'], additionalProperties: false } }], tool: (agent, name, args, signal) => this.tool(agent, name, args, signal), state: value => { this.view.backends.dragon = value; this.changed(false); }, mcp: value => { this.view.mcp = [...this.view.mcp.filter(v => v.id !== value.id), value]; this.changed(false); }, agent: (id, task) => { const session = this.session(id); session.tasks ??= []; const old = session.tasks.find(t => t.id === task.id); if (old) Object.assign(old, task); else session.tasks.push(task); this.changed(); } });
     this.codex = new CodexBackend({ preferences: () => this.state.settings.assistant, home: path.join(options.home, 'codex-runtime'), executable: () => this.state.settings.codexPath, tools: this.dragon, state: value => { this.view.backends.codex = value; this.changed(false); }, account: value => { this.view.account = value; this.changed(false); }, quota: value => { this.view.quota = value; this.changed(false); }, open: options.open });
     this.coordinator=new Coordinator({codex:this.codex,dragon:this.dragon,settings:()=>this.state.settings,key:id=>this.secrets.get(id),changed:()=>this.changed()});
   }
   snapshot(): Snapshot { return structuredClone({ ...this.state, ...this.view, sessions:this.state.sessions.map(s=>({...s,queuedMessages:(this.state.petChat?.queue??[]).filter(q=>q.sessionId===s.id).map(q=>({...q,paused:!this.petQueueArmed.has(q.commandId)}))})) }); }
-  changed(persist = true) { if (persist) this.store.save(this.state); this.view.revision++; this.emit('change'); }
+  /**
+   * 流式 token 不逐次同步写盘：任务运行中约 1 次/秒合并，空闲交互保持 250ms 的即时感。
+   * 终态、退出前仍会强制 flush，崩溃最多丢约 1 秒的中间输出。
+   */
+  private scheduleSave() {
+    this.savePending = true;
+    if (this.saveTimer) return;
+    const busy = this.state.sessions.some(isBusy);
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = undefined;
+      if (!this.savePending) return;
+      this.savePending = false;
+      try { this.store.save(this.state); const perf = (globalThis as any).__dragonPerf; if (perf) perf.saves += 1; }
+      catch (error) { console.error('保存工作台状态失败：', error); }
+    }, busy ? 1000 : 250);
+  }
+  flushPersistence() {
+    if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = undefined; }
+    if (!this.savePending) return;
+    this.savePending = false;
+    this.store.save(this.state);
+    const perf = (globalThis as any).__dragonPerf; if (perf) perf.saves += 1;
+  }
+  changed(persist = true) {
+    if (persist) {
+      if (process.env.DRAGON_PERF_BASELINE === '1') {
+        this.store.save(this.state);
+        const perf = (globalThis as any).__dragonPerf; if (perf) perf.saves += 1;
+      } else this.scheduleSave();
+    }
+    const perf = (globalThis as any).__dragonPerf; if (perf) perf.changes += 1; this.view.revision++; this.emit('change');
+  }
   session(id: string) { const value = this.state.sessions.find(s => s.id === id); if (!value) throw new Error('会话不存在。'); return value; }
   idleSettings() { if (this.state.sessions.some(isBusy)) throw new Error('请先停止正在执行的任务，再修改连接设置。'); }
   async cleanDeletedSessions() {
@@ -129,13 +164,21 @@ export class Runtime extends EventEmitter {
         if(!['plan','execute'].includes(action.mode)||s.backend!=='dragon'||s.collaboration?.enabled||s.readOnly||isBusy(s)||s.pending.length||this.state.petChat?.queue?.some(q=>q.sessionId===s.id))throw Error('请在普通 Dragon 聊天空闲且待发送队列为空时切换模式。');
         s.mode=action.mode;s.planArmed=action.mode==='plan';this.changed();return true;
       }
+      case 'session.plan.preview': {
+        const s=this.session(action.sessionId),p=s.plans?.find(p=>p.id===action.planId);
+        if(!p)throw Error('计划不存在。');
+        this.view.planPreview={sessionId:s.id,planId:p.id,at:Date.now()};
+        this.state.settings.layout={leftCollapsed:this.state.settings.layout?.leftCollapsed??false,rightCollapsed:false};
+        this.changed();return true;
+      }
       case 'session.plan.execute': {
         const s=this.session(action.id),p=s.plans?.find(p=>p.id===action.versionId);
         if(p?.execution?.commandId===action.commandId)return true;
         if(s.mode!=='plan'||s.backend!=='dragon'||s.collaboration?.enabled||s.readOnly||isBusy(s)||s.pending.length||this.state.petChat?.queue?.some(q=>q.sessionId===s.id)||!p||p!==s.plans?.at(-1)||p.stale||p.execution||p.plan.questions.length)throw Error('请确认最新完整计划，等待当前任务与队列结束。');
         if(!action.commandId||action.commandId.length>200)throw Error('无效请求编号');
         s.mode='execute';p.execution={commandId:action.commandId,at:Date.now()};
-        try{this.send(s.id,'执行以下已确认计划：\n\n'+planMarkdown(p.plan),action.commandId,true);p.execution.runId=s.runId;this.changed();}
+        p.execution={commandId:action.commandId,at:Date.now(),status:'running'};
+        try{this.send(s.id,'执行以下已确认计划：\n\n'+planMarkdown(p.plan)+'\n\n完成后请用一条最终总结回复：说明已完成内容、改动的文件、实际验收结果和未完成事项；不要只调用工具而不回复。',action.commandId,true);p.execution.runId=s.runId;this.changed();}
         catch(error){s.mode='plan';p.execution=undefined;throw error;}return true;
       }
       case 'session.collaboration': {
@@ -250,6 +293,7 @@ export class Runtime extends EventEmitter {
         if (!['simple', 'detailed'].includes(action.mode)) throw new Error('无效的聊天视图。');
         this.state.settings.pet.chatMode = action.mode; break;
       }
+      case 'pet.behavior': this.state.settings.pet.behavior = validPetBehavior(action.behavior); break;
       case 'session.draft': this.session(action.id).draft = action.text.slice(0, 200000); break;
       case 'session.send': {const s=this.session(action.id);if(this.state.sessions.some(s=>s.messages.some(m=>m.commandId===action.commandId))||this.state.petChat?.queue?.some(q=>q.commandId===action.commandId))return true;
         if(isBusy(s)||this.state.petChat?.queue?.some(q=>q.sessionId===s.id)){this.enqueue(s.id,action.text,action.commandId,s.draftAttachments??[]);s.draft='';s.draftAttachments=[];this.changed();if(!isBusy(s))this.drainQueue(s.id);}else this.send(s.id,action.text,action.commandId);return true;}
@@ -283,7 +327,7 @@ export class Runtime extends EventEmitter {
       case 'memory.save': { if (!action.text.trim()) return; const id = action.id ?? randomUUID(); this.state.memory = [...this.state.memory.filter(m => m.id !== id), { id, text: action.text.trim().slice(0, 16000), tags: action.tags, createdAt: Date.now() }]; break; }
       case 'memory.delete': this.state.memory = this.state.memory.filter(m => m.id !== action.id); break;
       case 'assistant.preferences.save': this.state.settings.assistant = validAssistantPreferences(action.preferences); break;
-      case 'appearance.save': {const old=this.state.settings.appearance??structuredClone(DEFAULT_APPEARANCE);this.state.settings.appearance={...old,...appearanceValues({...old,...action.values}),tab:action.tab&&['desk','library','make'].includes(action.tab)?action.tab:old.tab};break;}
+      case 'appearance.save': {const old=this.state.settings.appearance??structuredClone(DEFAULT_APPEARANCE);this.state.settings.appearance={...old,...appearanceValues({...old,...action.values}),tab:action.tab&&['desk','behavior','library','make'].includes(action.tab)?action.tab:old.tab};break;}
       case 'appearance.preset.save': {const a=this.state.settings.appearance??=structuredClone(DEFAULT_APPEARANCE);const name=action.name.trim().slice(0,60);if(!name)throw Error('请输入预设名称');const old=a.presets.find(p=>p.id===action.id);if(old){old.name=name;}else{a.presets.push({id:randomUUID(),name,values:appearanceValues(a),theme:this.state.settings.theme,accent:this.state.settings.accent??'violet',wallpaper:structuredClone(this.state.settings.wallpaper)});}break;}
       case 'appearance.preset.delete': {const a=this.state.settings.appearance;if(a)a.presets=a.presets.filter(p=>p.id!==action.id);break;}
       case 'appearance.reset': {const a=this.state.settings.appearance??structuredClone(DEFAULT_APPEARANCE);this.state.settings.appearance={...a,...appearanceValues(DEFAULT_APPEARANCE)};this.state.settings.theme='light';this.state.settings.accent='violet';this.state.settings.wallpaper=null;break;}
@@ -297,7 +341,7 @@ export class Runtime extends EventEmitter {
       case 'wallpaper.choose': { const source = await this.chooseWallpaperFile?.(); if (!source) return; const stored = storeWallpaper(source);const a=this.state.settings.appearance??=structuredClone(DEFAULT_APPEARANCE);a.wallpapers.unshift({...stored,addedAt:Date.now(),usedAt:Date.now()}); this.state.settings.wallpaper = { ...stored, opacity: .55, blur: 0, dim: .2 }; this.changed(); return; }
     case 'wallpaper.clear': { this.state.settings.wallpaper = null; this.changed(); return; }
     case 'wallpaper.tune': { const w = this.state.settings.wallpaper; if (w) { const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v)); w.opacity = clamp(action.opacity ?? w.opacity, 0, 1); w.blur = clamp(action.blur ?? w.blur, 0, 24); w.dim = clamp(action.dim ?? w.dim, 0, .8); this.changed(); } return; }
-    case 'settings.save': this.idleSettings(); if (action.limits) this.state.settings.limits = validLimits(action.limits); if (action.theme) this.state.settings.theme = action.theme; if (action.accent) this.state.settings.accent = action.accent; if (action.codexPath !== undefined) { this.state.settings.codexPath = action.codexPath; await this.codex.dispose(); } if (action.pet) this.state.settings.pet = { ...this.state.settings.pet, ...action.pet, scale: Math.max(.5, Math.min(2, action.pet.scale ?? this.state.settings.pet.scale)) }; break;
+    case 'settings.save': this.idleSettings(); if (action.limits) this.state.settings.limits = validLimits(action.limits); if (action.theme) this.state.settings.theme = action.theme; if (action.accent) this.state.settings.accent = action.accent; if (action.codexPath !== undefined) { this.state.settings.codexPath = action.codexPath; await this.codex.dispose(); } if (action.pet) this.state.settings.pet = { ...this.state.settings.pet, ...action.pet, scale: Math.max(.5, Math.min(2, action.pet.scale ?? this.state.settings.pet.scale)), behavior: action.pet.behavior ? validPetBehavior({ ...this.state.settings.pet.behavior, ...action.pet.behavior }) : this.state.settings.pet.behavior }; break;
       case 'quota.refresh': await this.codex.quota(); return;
       case 'codex.login': await this.codex.login(); return;
       default: return false;
@@ -412,6 +456,35 @@ export class Runtime extends EventEmitter {
     catch(error){for(const item of this.state.petChat?.queue??[])if(item.sessionId===id)this.petQueueArmed.delete(item.commandId);s.error='待发送消息已暂停：'+(error as Error).message;}
     this.changed();
   }
+  /**
+   * 计划执行轮次的收尾：写回终态、插入完成提示。模型没有返回最终文本时
+   * 追加一条明确标注的兜底总结，避免计划跑完后聊天停在工具记录上。
+   */
+  private finalizePlanRun(s: AgentSession, runId: string) {
+    const plan = s.plans?.find(p => p.execution?.runId === runId);
+    const execution = plan?.execution;
+    if (!plan || !execution || execution.finishedAt) return;
+    const status: PlanExecutionStatus = s.status === 'completed' ? 'completed'
+      : s.status === 'cancelled' || s.status === 'interrupted' ? 'cancelled'
+        : s.status === 'paused' ? 'paused' : 'error';
+    execution.status = status;
+    execution.finishedAt = Date.now();
+    const label = status === 'completed' ? '计划执行完成。' : status === 'cancelled' ? '计划执行已停止。' : status === 'paused' ? '计划执行已暂停。' : '计划执行失败。';
+    const detail = status === 'completed' ? '' : (s.error ? ' ' + s.error : '');
+    let sequence = Math.max(0, ...s.messages.map(m => m.sequence ?? 0), ...s.tools.map(t => t.sequence ?? 0));
+    s.messages.push({ id: randomUUID(), role: 'notice', text: label + detail, createdAt: Date.now(), runId, sequence: ++sequence });
+    const hasFinal = s.messages.some(m => m.runId === runId && m.role === 'assistant' && !!m.text.trim() && !m.partial);
+    if (!hasFinal) {
+      const fallback = status === 'completed'
+        ? '计划已执行完成。模型本轮没有返回额外总结；完整操作记录和产物保留在会话中，可在右侧“计划”页查看。'
+        : status === 'cancelled'
+          ? '计划执行已停止。模型本轮没有返回额外总结；已完成的步骤和产物仍保留，可在右侧“计划”页查看。'
+          : status === 'paused'
+            ? '计划执行已暂停。模型本轮没有返回额外总结；请恢复额度或预算后继续，并核对已有结果。'
+            : '计划执行没有完成。模型本轮没有返回额外总结；请查看上方错误和执行详情后重试。';
+      s.messages.push({ id: randomUUID(), role: 'assistant', text: fallback, createdAt: Date.now(), runId, sequence: ++sequence });
+    }
+  }
   send(id: string, text: string, commandId: string, independent=false,independentAttachments:ChatAttachment[]=[]) {
     if (this.configuring) throw new Error('正在保存连接设置，请稍后发送。');
     const s = this.session(id); if (s.readOnly) throw new Error('这是只读历史，请携带摘录创建新会话。'); if (s.messages.some(m => m.commandId === commandId)) return;
@@ -422,7 +495,7 @@ export class Runtime extends EventEmitter {
     if(!text.trim())text='请阅读这些资料，帮我整理要点。';
     if (s.backend === 'dragon' && !this.state.settings.profiles.some(p => p.id === s.profileId)) throw new Error('请在设置中添加模型 API，再创建会话。');
     const runId = randomUUID(), controller = new AbortController();
-    const confirmed=s.plans?.find(p=>p.execution?.commandId===commandId);if(confirmed?.execution)confirmed.execution.runId=runId;
+    const confirmed=s.plans?.find(p=>p.execution?.commandId===commandId);if(confirmed?.execution){confirmed.execution.runId=runId;confirmed.execution.status='running';}
     s.runId = runId; s.status = 'running'; s.error = undefined; if(!independent)s.draft = ''; s.updatedAt = Date.now();
     if (!s.messages.length) s.title = text.trim().slice(0, 25);
     s.messages.push({ id: randomUUID(), commandId, role: 'user', text, createdAt: Date.now(), runId, sequence:Math.max(0,...s.messages.map(m=>m.sequence??0),...s.tools.map(t=>t.sequence??0))+1, attachments: attached, contextCheckpoint:runId, beforeNativeId:s.nativeId, beforeNativeTurnId:s.nativeTurnId }); if(!independent)s.draftAttachments=[];
@@ -475,7 +548,8 @@ export class Runtime extends EventEmitter {
       if(planTurn&&s.mode==='plan'&&!(s.plans??[]).some(p=>p.runId===runId)){s.mode='execute';s.planArmed=false;}
       controller.abort(); for (const m of s.messages) if (m.runId === runId) m.partial = false;
       for (const tool of s.tools) if (tool.runId === runId && ['running','queued','approval'].includes(tool.status)) tool.status = s.status === 'cancelled' ? 'cancelled' : 'unknown';
-      s.pending = []; this.runs.delete(s.id); s.updatedAt = Date.now(); this.changed(); await host.dispose();
+      this.finalizePlanRun(s, runId);
+      s.pending = []; this.runs.delete(s.id); s.updatedAt = Date.now(); this.changed(); this.flushPersistence(); await host.dispose();
       for (const [key, scope] of this.scopes) if (key.startsWith(s.id + ':')) { this.scopes.delete(key); await scope.host.dispose(); }
       if(s.status==='completed')this.drainQueue(s.id);else {for(const q of this.state.petChat?.queue??[])if(q.sessionId===s.id)this.petQueueArmed.delete(q.commandId);this.changed();}
     });
@@ -543,5 +617,5 @@ export class Runtime extends EventEmitter {
     });
   }
   async stop(id: string) { const s = this.session(id), run = this.runs.get(id); if (!run) return; s.status = 'stopping'; run.controller.abort(); this.changed(); await (s.backend === 'dragon' ? this.dragon : this.codex).cancel(s); }
-  async dispose() { for (const run of this.runs.values()) run.controller.abort(); await Promise.allSettled([this.dragon.dispose(), this.codex.dispose()]); await Promise.allSettled([...this.runs.values()].map(v => v.done)); this.store.save(this.state); this.store.close(); }
+  async dispose() { for (const run of this.runs.values()) run.controller.abort(); await Promise.allSettled([this.dragon.dispose(), this.codex.dispose()]); await Promise.allSettled([...this.runs.values()].map(v => v.done)); this.flushPersistence(); this.store.close(); }
 }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { HttpModelAdapter, serialize, type ModelRequest } from '../packages/agent-core/src';
+import { HttpModelAdapter, ModelStreamError, serialize, type ModelRequest } from '../packages/agent-core/src';
 function request(protocol: ModelRequest['profile']['protocol']): ModelRequest { return { profile: { id: 'p', model: 'm', protocol, baseUrl: 'https://example.test/v1', contextWindow: 65536, maxOutput: 4096 }, key: 'secret', messages: [{ role: 'user', text: '你好' }], tools: [], maxOutput: 4096, signal: new AbortController().signal, onText() {} }; }
 function stream(events: any[], fragment = 3) { const bytes = new TextEncoder().encode(events.map(e => `data: ${JSON.stringify(e)}\r\n\r\n`).join('')); return new Response(new ReadableStream({ start(c) { for (let i = 0; i < bytes.length; i += fragment) c.enqueue(bytes.slice(i, i + fragment)); c.close(); } }), { headers: { 'Content-Type': 'text/event-stream' } }); }
 test('Chat Completions handles UTF-8 fragments, multiple tools, reasoning and usage', async () => {
@@ -58,4 +58,13 @@ test('DeepSeek 思考模式参数：官方档位只发给 DeepSeek 端点', () =
   const other = request('openai-completions'); other.reasoningEffort = 'max';
   assert.equal((serialize(other).body as any).reasoning_effort, undefined);
   assert.equal((serialize(other).body as any).thinking, undefined);
+});
+
+function brokenStream(events: any[] = []) {
+  const bytes = new TextEncoder().encode(events.map(e => 'data: ' + JSON.stringify(e) + '\r\n\r\n').join(''));
+  return new Response(new ReadableStream({ start(c) { if (bytes.length) c.enqueue(bytes); setTimeout(() => c.error(Object.assign(new TypeError('terminated'), { cause: { code: 'UND_ERR_SOCKET' } })), 5); } }), { headers: { 'Content-Type': 'text/event-stream' } });
+}
+test('断流在网络层关闭时给出可重试错误，并在已有输出后禁止自动重放', async () => {
+  await assert.rejects(new HttpModelAdapter(async () => brokenStream()).generate(request('openai-completions')), (error: any) => error instanceof ModelStreamError && error.safeToRetry && /连接被中断/.test(error.message));
+  await assert.rejects(new HttpModelAdapter(async () => brokenStream([{ choices: [{ delta: { content: 'partial' } }] }])).generate(request('openai-completions')), (error: any) => error instanceof ModelStreamError && !error.safeToRetry && /不完整/.test(error.message));
 });

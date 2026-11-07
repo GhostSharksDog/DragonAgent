@@ -1,7 +1,7 @@
 import { WebLink } from './WebLink';
 import {remarkEmphasis,copyProse} from './remark-emphasis';
 import {remarkCjkLink} from './remark-cjk-link';
-import React, { useRef, useState } from 'react';
+import React, { memo, useRef, useState } from 'react';
 import Markdown, { defaultUrlTransform } from 'react-markdown';
 import type { Action, FileArtifact } from '../shared/contracts';
 import remarkGfm from 'remark-gfm';
@@ -21,7 +21,16 @@ function CodeBlock({ children }: { children?: React.ReactNode }) {
   const code = useRef<HTMLPreElement>(null);
   return <div className="code-card"><div className="code-toolbar"><span>代码</span><CopyButton label="复制代码" text={() => code.current?.textContent ?? ''}/></div><pre ref={code}>{children}</pre></div>;
 }
-export function RichText({ text, files=[], sessionId, act }: { text: string; files?:FileArtifact[]; sessionId?:string; act?:(a:Action)=>Promise<unknown> }) {
+/** 快照会克隆 artifacts；只比较链接相关字段，避免同一批文件让历史 Markdown 反复解析。 */
+function sameFiles(a?: FileArtifact[], b?: FileArtifact[]) {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((file, index) => {
+    const other = b[index];
+    return file.id === other.id && file.path === other.path && file.name === other.name && file.size === other.size && file.modifiedAt === other.modifiedAt;
+  });
+}
+function RichTextView({ text, files=[], sessionId, act }: { text: string; files?:FileArtifact[]; sessionId?:string; act?:(a:Action)=>Promise<unknown> }) {
   const match=(href:string)=>{try{const normalized=decodeURIComponent(href).replace(/^file:\/\/\/?/i,'').replace(/^\/([a-z]:)/i,'$1').replace(/:\d+(?::\d+)?$/,'').replace(/\\/g,'/').toLowerCase();return files.find(f=>f.path.replace(/\\/g,'/').toLowerCase()===normalized);}catch{return undefined;}};
   // 图片不直接铺开：先给一行可收纳的卡片，展开才取图，双击再看大图。
   const picture=(alt:string|undefined,src:string|undefined)=>{
@@ -37,3 +46,8 @@ export function RichText({ text, files=[], sessionId, act }: { text: string; fil
     table: ({ children }) => <div className="table-scroll"><table>{children}</table></div>,
   }}>{text}</Markdown></div>;
 }
+/**
+ * 流式输出时只有正在增长的那条消息文本会变；历史消息的 text 与文件列表
+ * 不变时直接复用已解析的 Markdown，避免每个 token 重排整段历史。
+ */
+export const RichText = memo(RichTextView, (previous, next) => previous.text === next.text && previous.sessionId === next.sessionId && previous.act === next.act && sameFiles(previous.files, next.files));

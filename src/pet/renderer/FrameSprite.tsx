@@ -30,6 +30,7 @@ export function FrameSprite(props: FrameSpriteProps) {
     element.dataset.ready = 'false';
     element.dataset.preloadGeneration = String(currentGeneration);
     let cancelled = false, scheduled = 0, lastRender = '';
+    let visibilityHandler: (() => void) | undefined;
     const files = [...new Set(Object.values(skin.manifest.animations).flatMap(animation => animation.frames))];
     const images = new Map<string, HTMLImageElement>();
     const decode = (file: string) => {
@@ -50,7 +51,7 @@ export function FrameSprite(props: FrameSpriteProps) {
       element.dataset.sourceCount = String(files.length);
       const render = () => {
         if (cancelled) return;
-        if (latestSignature.current !== signature) { scheduled = window.requestAnimationFrame(render); return; }
+        if (latestSignature.current !== signature) { scheduled = window.setTimeout(render, 50); return; }
         const current = latest.current, manifest = current.skin.manifest;
         const animation = manifest.animations[current.animationKey] ?? manifest.animations.idle;
         const clockKey = `${base}\0${current.animationKey}\0${JSON.stringify(animation)}`;
@@ -72,12 +73,19 @@ export function FrameSprite(props: FrameSpriteProps) {
           // Moving an already decoded element avoids a transient empty src/undecoded frame.
           if (region.firstElementChild !== image) region.replaceChildren(image);
         }
-        scheduled = window.requestAnimationFrame(render);
+        // 静态/低帧率素材不需要 60fps 重绘；按动画 fps 安排下一次即可。
+        const fps = Math.max(1, Math.min(60, animation.fps || 12));
+        scheduled = window.setTimeout(render, Math.max(16, Math.round(1000 / fps)));
       };
+      visibilityHandler = () => {
+        if (document.visibilityState === 'hidden') { window.clearTimeout(scheduled); scheduled = 0; return; }
+        if (!scheduled) { lastRender = ''; render(); }
+      };
+      document.addEventListener('visibilitychange', visibilityHandler);
       render();
     }).catch(error => { if (!cancelled) latest.current.onError?.(`角色图片加载失败：${error instanceof Error ? error.message : String(error)}`); });
     // Keep the previous complete picture visible while a genuinely new skin decodes.
-    return () => { cancelled = true; window.cancelAnimationFrame(scheduled); };
+    return () => { cancelled = true; window.clearTimeout(scheduled); if (visibilityHandler) document.removeEventListener('visibilitychange', visibilityHandler); };
   }, [signature]);
   return <div ref={host} className="sprite-canvas" data-ready="false"><div ref={logical} style={{ position: 'absolute', overflow: 'hidden' }}><div ref={crop} style={{ position: 'absolute', overflow: 'hidden' }} /></div></div>;
 }

@@ -1,4 +1,5 @@
 import {DEFAULT_APPEARANCE,appearanceValues} from '../shared/appearance';
+import {DEFAULT_PET_BEHAVIOR,validPetBehavior} from '../shared/pet-behavior';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -9,7 +10,7 @@ export interface PersistentState { petChat?:import('../shared/contracts').Snapsh
 export function initialState(): PersistentState {
   return {
     settings: { profiles: [], selectedProfile: '', codexPath: '', theme: 'light', accent: 'violet', wallpaper: null, limits: { concurrency: 3, children: 12, requests: null },
-      pet: { visible: false, scale: 1, alwaysOnTop: true, shortcut: 'CommandOrControl+Alt+D' },
+      pet: { visible: false, scale: 1, alwaysOnTop: true, shortcut: 'CommandOrControl+Alt+D', behavior: structuredClone(DEFAULT_PET_BEHAVIOR) },
       mcp: [{ id: 'tavily', name: 'Tavily 网页搜索', enabled: false, transport: 'streamable-http', url: 'https://mcp.tavily.com/mcp/', hasKey: false }] },
     sessions: [], selectedSessionId: null, memory: [], imports: [],
   };
@@ -36,6 +37,8 @@ export class Store {
     for(const s of state.sessions)s.mode??='execute';
     if(state.petChat?.queue?.length)state.petChat.notice='上次待发送消息已保留，未自动重放。请核对后重新发送。';
     state.settings.limits ??= { concurrency: 3, children: 12, requests: null };
+    state.settings.pet ??= structuredClone(initialState().settings.pet);
+    state.settings.pet.behavior = validPetBehavior(state.settings.pet.behavior);
     for (const session of state.sessions) {
       if (![...session.messages,...session.tools].some(item=>item.sequence!==undefined)) {
         [...session.messages,...session.tools].sort((a,b)=>a.createdAt-b.createdAt).forEach((item,index)=>{item.sequence=index+1;});

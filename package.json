@@ -24,6 +24,7 @@
     "test:appearance": "node scripts/appearance-check.mjs",
     "test:model-switch": "node scripts/model-switch-check.mjs",
     "test:comfy-live": "node scripts/comfy-live-check.mjs",
+    "test:perf": "node scripts/perf-check.mjs",
     "smoke": "node scripts/smoke.mjs",
     "prepare:runtime": "tsx scripts/prepare-runtime.ts",
     "package": "npm run build && npm run prepare:runtime && node scripts/stage.mjs && npm ci --omit=dev --ignore-scripts --prefix .cache/package-app --cache .cache/npm && node scripts/package.mjs",

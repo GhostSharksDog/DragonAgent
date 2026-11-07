@@ -5,6 +5,20 @@ export class ModelHttpError extends Error {
   constructor(message: string, readonly status: number) { super(message); this.name = 'ModelHttpError'; }
   get retryable() { return this.status === 429 || this.status >= 500; }
 }
+export class ModelStreamError extends Error {
+  constructor(message: string, readonly retryable: boolean, readonly safeToRetry: boolean) { super(message); this.name = 'ModelStreamError'; }
+}
+/** 网络/服务端在流中途断开。safeToRetry 只在尚未产生任何文本或工具调用时为 true。 */
+export function isTransportInterruption(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const value = error as { name?: string; message?: string; code?: string; cause?: { code?: string; message?: string } };
+  if (value.name === 'AbortError') return false;
+  const code = value.code ?? value.cause?.code, message = `${value.message ?? ''} ${value.cause?.message ?? ''}`;
+  return code === 'UND_ERR_SOCKET' || code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || code === 'EPIPE' || code === 'ENOTFOUND' || code === 'EAI_AGAIN'
+    || /^(terminated|fetch failed)$/i.test(value.message ?? '')
+    || /other side closed|socket hang up/i.test(message)
+    || /模型流.*断开/.test(message);
+}
 export async function* sse(body: ReadableStream<Uint8Array>, signal: AbortSignal): AsyncGenerator<any> {
   const reader = body.getReader(), decoder = new TextDecoder(); let buffer = '';
   const abort = () => { void reader.cancel().catch(() => undefined); }; signal.addEventListener('abort', abort, { once: true });
@@ -66,7 +80,12 @@ export class HttpModelAdapter implements ModelAdapter {
   async generate(request: ModelRequest): Promise<ModelResponse> {
     const { url, headers, body } = serialize(request), signal = AbortSignal.any([request.signal, AbortSignal.timeout(180000)]);
     const requestStartedAt = Date.now();
-    const response = await this.transport(url, { method: 'POST', headers, body: JSON.stringify(body), signal });
+    let response: Response;
+    try { response = await this.transport(url, { method: 'POST', headers, body: JSON.stringify(body), signal }); }
+    catch (error) {
+      if (signal.aborted || !isTransportInterruption(error)) throw error;
+      throw new ModelStreamError('模型连接被中断（网络或服务端未响应），本轮还没有产生输出，可以直接重试。', true, true);
+    }
     if (!response.ok) { await response.body?.cancel(); throw new ModelHttpError(`模型 API 请求失败（HTTP ${response.status}）。请检查地址、模型、密钥与额度。`, response.status); }
     if (!response.body) throw new Error('模型 API 返回空响应。');
     const result: ModelResponse = { message: { role: 'assistant', text: '' }, usage: { input: 0, output: 0 }, finish: 'stop' };
@@ -80,6 +99,7 @@ export class HttpModelAdapter implements ModelAdapter {
   result.message.text += value;
   request.onText(value);
 };
+    try {
     for await (const e of sse(response.body, signal)) {
       if (e.error || e.type === 'error' || e.type === 'response.failed') throw new Error('模型流报告执行失败。');
       if (request.profile.protocol === 'openai-completions') {
@@ -121,7 +141,15 @@ export class HttpModelAdapter implements ModelAdapter {
       }
       if ([...calls.values()].some(c => c.arguments.length > 1048576)) throw new Error('模型工具参数过大。');
     }
-    signal.throwIfAborted(); if (!finished) throw new Error('模型流在完成前断开，未执行任何未提交工具调用。');
+    } catch (error) {
+      if (signal.aborted || !isTransportInterruption(error)) throw error;
+      const safe = result.message.text.length === 0 && calls.size === 0;
+      throw new ModelStreamError(safe
+        ? '模型连接被中断（网络或服务端断流），本轮还没有产生输出，可以直接重试。'
+        : '模型连接被中断（网络或服务端断流），当前回复不完整；为避免重复，没有自动重试。可以直接重试。', true, safe);
+    }
+    signal.throwIfAborted();
+    if (!finished) { const safe = result.message.text.length === 0 && calls.size === 0; throw new ModelStreamError('模型流在完成前断开，未执行任何未提交工具调用。' + (safe ? '可以直接重试。' : ''), true, safe); }
     result.message.calls = [...calls.values()];
     if (result.message.calls.some(c => !c.id || !c.name)) throw new Error('模型工具调用缺少名称或 ID。');
     if (reasoning) result.message.replay = { profileId: request.profile.id, configuration: configuration(request.profile), value: { reasoning_content: reasoning } };

@@ -10,12 +10,23 @@ export function effectiveAnimationKey(manifest: SkinManifest | null | undefined,
   return manifest?.rig || manifest?.animations[requested] || manifest?.videos?.[requested] ? requested : 'idle';
 }
 
-/** Keep an unfinished stationary skin at rest rather than sliding its idle pose. */
-export function roamingAnimationMotion(manifest: SkinManifest | null | undefined): Exclude<Motion, 'idle'> | null {
-  if (!manifest) return null;
-  if (manifest.rig) return 'running';
+/**
+ * 空闲跑动可用的动作集合。骨骼皮肤仍不参与自动跑动（窗口移动时无法同步
+ * 方向），有走路/跑步任一侧成对动作即可出发。
+ */
+export function availableRoamMotions(manifest: SkinManifest | null | undefined): { walking: boolean; running: boolean } {
+  if (!manifest || manifest.rig) return { walking: false, running: false };
   const has = (key: string) => !!(manifest.animations[key] || manifest.videos?.[key]);
-  if (has('running-left') && has('running-right')) return 'running';
-  if (has('walking-left') && has('walking-right')) return 'walking';
+  return {
+    walking: has('walking-left') && has('walking-right'),
+    running: has('running-left') && has('running-right'),
+  };
+}
+
+/** 兼容旧调用：返回优先动作；新代码应使用 availableRoamMotions 保留走/跑两种能力。 */
+export function roamingAnimationMotion(manifest: SkinManifest | null | undefined): Exclude<Motion, 'idle'> | null {
+  const motions = availableRoamMotions(manifest);
+  if (motions.walking) return 'walking';
+  if (motions.running) return 'running';
   return null;
 }
