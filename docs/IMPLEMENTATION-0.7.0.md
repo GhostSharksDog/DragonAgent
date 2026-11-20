@@ -70,19 +70,25 @@
 - 输入栏菜单与计划卡文案明确“仅下一条消息生效”。
 - 新增 `npm run test:model-switch`；`test:planning` 增加一次性计划、后续恢复执行、提示词触发计划检查。
 
+### 桌宠行为与计划检查器（2026-11-07 后续提交 b80b328）
+
+- 桌宠新增空闲散步/跑动、睡觉/唤醒、动作状态与安静/标准/活泼预设；新增 `pet-behavior`、`pet-roam` 单元测试和 Electron 行为/界面检查。
+- 计划卡与计划检查器继续完善，新增紧凑气泡、性能检查脚本；计划模式仍只对下一轮生效。
+- 单元/集成测试增至 **91 项**；对应提交已推送到 GitHub `main`。
+
 ### 验证结果
 
 - `npm run typecheck`：通过。
 - `npm run build`：通过（Vite 主包 >500 KB 警告仍在）。
-- `npm test`：**67 通过、0 失败**。
+- `npm test`：**91 通过、0 失败**。
 - `npm run test:workbench`、`test:queue`、`test:ui`、`test:planning`、`test:model-switch`、`test:media`、`test:composer`、`test:reasoning`、`test:context-bar`、`test:appearance`：全部通过。
-- 真实方舟、真实 Pixiv、真实 ComfyUI 冷启动：**未执行/未验收**；固定入口替换**未执行**。
-- 源码已按核心、云端制作、外观界面、发行文档分提交并推送到 GitHub `main`；候选验收报告见 [ACCEPTANCE-0.7.0.md](ACCEPTANCE-0.7.0.md)。
+- 真实方舟、真实 Pixiv：**未执行/未验收**；真实 ComfyUI 冷启动与 Animagine 单图已通过；固定入口替换**未执行**。
+- 源码已分提交推送到 GitHub `main`（最新 `b80b328`）；候选验收报告见 [ACCEPTANCE-0.7.0.md](ACCEPTANCE-0.7.0.md)。
 
 ## 仍未完成
 
 1. 真实方舟付费验收：用户已尝试配置，但保存的值只有 22 字符（`api-` 前缀），方舟返回 `The API key format is incorrect`；需要重新复制完整 API Key，再跑立绘/动作视频真实链路。
 2. 真实 Pixiv 登录/检索/识图验收。
-3. 本轮计划模式与模型切换修复晚于候选包构建，**最终交付前必须重新打包并更新 SHA256**。
+3. 候选包已按 `b80b328` 重建，`release-check` 于 2026-11-20 复核通过；源码与发行包一致。
 4. 真实云端与界面验收通过、任务空闲、数据备份后，才替换 `release/win-unpacked`。
 5. 安装包未签名；FFmpeg GPL 分发合规仍需最终确认。

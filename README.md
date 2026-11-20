@@ -1,97 +1,185 @@
-# DragonAgent 0.4.0
+# DragonAgent 0.7.0
 
-银白龙娘主题的 Windows 桌面 Agent。**独立 TypeScript 执行内核；DSH 只作为架构参考，没有 DSH SDK、服务或运行依赖。** 工作台与原版龙娘共享聊天、草稿、任务和审批。
+银白龙娘主题的 Windows 桌面 Agent 工作台。图形界面使用 Electron + React，Agent 执行循环、工具注册、审批、预算、摘要和恢复由仓库内的自研 TypeScript 内核 `packages/agent-core` 完成；本仓库不依赖 DSH SDK 或第三方 Agent 框架。
 
-最近对话右侧的垃圾桶可删除聊天；「记忆与历史 → 全部历史对话」也能删除已归档聊天。确认后清理本应用对话、任务记录和附件副本；工作文件、独立记忆、其他对话中的摘录以及 Codex 原生历史保留。执行中需先停止任务。
+> **当前状态：0.7.0 候选，不是正式发布。**
+> 源码已推送 GitHub `main`（最新 `b80b328`）。真实火山方舟付费生成和真实 Pixiv 登录验收尚未完成，固定启动目录 `release\win-unpacked` 尚未替换。候选安装包、ZIP 与 SHA256 见下方「验证与发行状态」。
 
-## 当前交付
+## 0.7.0 主要变化
 
-0.4.0 完成 Agent 与龙娘交流优化：统一时间线、消息版本、文件预览、GPT／DeepSeek 协作、圆角表格与重点标记、统一额度气泡和独立聊天自动接续。详见 [发行记录](docs/RELEASE-0.4.0.md)。
+- **一次性计划模式**：手动开启只对下一条消息生效；计划期只读调查，`plan_submit` 提交结构化计划，确认后才执行。没有产出计划时自动回到执行模式；提交计划后可确认执行或点“继续修改”再次进入；提示词明确要求“先制定计划”时只对当前轮启用。
+- **聊天内切换模型**：Dragon 与 Codex 之间、不同 Dragon API 连接之间都在当前聊天内切换，不另开聊天；下一条消息携带最近对话摘录。协作模式可在模型菜单顶部直接退出。
+- **云端桌宠制作**：火山方舟 Seedream 立绘 + Seedance 动作视频，预算上限、未知结果人工核对、只查询不重提、取消/恢复；本地 FFmpeg 抠像和透明 WebM，原片保留。
+- **桌宠库与行为**：目录/ZIP 导入导出、缩略图、应用/删除；空闲散步、跑动、睡觉、点击/拖拽/审批等动作状态，支持安静/标准/活泼预设。
+- **外观工坊**：壁纸、区域透明度、主题、强调色、字号与密度、预设；输入栏始终不透明，自定义强调色自动收敛到可读范围。
+- **角色插画**：Pixiv 参考、提示词 Agent、本地 ComfyUI（Anima/Animagine）、角色 LoRA、单图生成与历史项目。
+- **发行媒体**：`dist/runtime/media` 随包携带 ffmpeg/ffprobe 与 SHA256/许可材料，发行版不依赖系统 FFmpeg。
 
-原版龙娘保留；动画制作已暂缓，原有项目和素材在「历史工坊」查看，不自动恢复任务。独立角色插画另行交付 0.5.0，见 [实施范围](docs/ROADMAP-0.5.0.md)。
+## 快速开始
 
-## 界面
+### 使用发行版
 
-![Codex 推理强度](docs/screenshots/reasoning-popover.png)
+- 候选解压版：`release\0.7.0\win-unpacked\DragonAgent.exe`
+- 候选安装包：`release\0.7.0\DragonAgent-Setup-0.7.0.exe`
+- 候选便携 ZIP：`release\0.7.0\DragonAgent-0.7.0-win.zip`
 
-![桌宠简约输入](docs/screenshots/bubble-simple.png)
+解压便携版后保留可执行文件旁的全部资源目录。本机固定入口 `release\win-unpacked` 目前仍可能是旧版本，不能当作 0.7.0 验收依据。
 
-[权限菜单](docs/screenshots/permissions-dark.png) · [深色窗口](docs/screenshots/window-dark.png)
+### 首次配置
 
-## 使用
+1. **模型 API**：设置 → 模型 API，填写服务地址、模型 ID、API Key 和服务商实际上下文窗口；支持 Chat Completions、Responses、Anthropic Messages。
+2. **工作文件夹**：新建聊天后选择工作文件夹。文件、命令和浏览器操作按当前对话权限审批。
+3. **可选通道**：
+   - Codex：在设置中登录账号后，在模型菜单的 Codex 页签选择模型和推理强度。
+   - MCP：工具连接中添加 stdio / Streamable HTTP 服务。
+   - 本地插画：安装 ComfyUI 并准备 Anima/Animagine 模型；模型权重不随仓库分发。
+   - 云端桌宠：在「制作桌宠 → 方舟服务与价格配置」填写方舟 Key、模型 ID、价格与支持参数；没有确认预算不会发起付费生成。
 
-下载对应版本的安装包，或完整解压便携 ZIP 后运行 `DragonAgent.exe`。模型 API 与 Codex 登录在本机配置，仓库不包含账号数据。
+网页操作需要 Google Chrome。应用本身不要求另装 Node 或 Python；可选的 ComfyUI 使用它自己的 Python 环境。
 
-本机启动入口：`E:\Projects\DragonAgent\release\win-unpacked\DragonAgent.exe`。安装包与便携 ZIP 位于 `release/0.4.0`。解压便携版后保留可执行文件旁的所有资源目录。Agent 与原版桌宠不需要另装 Node 或 Python，网页操作需要 Google Chrome。可选本地生图使用独立 ComfyUI。
+## 工作台
 
-1. 在「设置 → 模型 API」添加服务地址、模型 ID、API Key 和服务商实际提供的上下文窗口。支持 Chat Completions、Responses、Anthropic Messages。
-2. 新建聊天，在输入框右下角的模型按钮中选择「其他模型」下的 API 配置，选择工作文件夹，然后发送任务。模型按需要调用文件、浏览器、命令、MCP 或子 Agent 工具。
-3. 在全请求批准模式下，文件变更会展示内容并请求批准。覆盖已有文件必须先读取它，携带读取到的版本提交修改；版本变化会拒绝覆盖。全请求批准模式下命令需启用并逐次审批，另外两档自动批准命令。
-4. 「工具连接」中填写 Tavily 密钥并启用，或添加自己的 stdio / Streamable HTTP MCP。连接失败可以点击「连接已启用服务」重连。失败操作不会自动重发。
-5. 「设置 → 任务协作与调用额度」调整限额。默认并行 3 个子任务、每棵任务树最多 12 个子任务、64 次模型请求。摘要和重试也消耗额度。对话中的任务卡可查看结果、用量，或停止单个子任务；停止主任务会停止整个任务树。
-6. 右上角「召唤龙娘」或 `Ctrl + Alt + D` 显示/收起桌宠。原来的外观、动画和手势保留：单击看回复、双击看额度与 API 余额、聊天按钮输入、拖动移动、右键菜单。气泡默认简约输入，右上角「详细」展开聊天、附件和设置；「简约」可收回，并记住选择。待确认提示可直接打开详细版审批主任务和子任务。
+- 统一时间线、消息版本、任务树、文件产物预览、上下文/Token 状态条。
+- 附件支持 UTF-8 文本/代码、PDF、DOCX、PNG/JPEG/WebP/GIF；单文件最多 32 MB，每条消息最多 10 份。图片导入会生成适配副本，原文件不变。
+- 自研通道总上下文上限 512K tokens，并与模型配置窗口取较小值；约 80% 开始压缩，完整历史和大工具输出保存为本地附件。
+- 三档权限：**全请求批准**、**帮我批准**、**完全放开**。命令以当前 Windows 账号运行，审批和范围检查不是操作系统级容器。
+- 子 Agent 不扩大父任务授权；父子任务均持久化目标、状态、用量和结果。停止主任务会取消整棵任务树。
+- 请求重试不会重放已执行的工具；结果未知的操作不会自动重复提交或重放审批。
 
-Codex 是可选的外部通道：在设置中登录账号后，通过模型菜单中的「Codex」页签选择模型，在模型旁的推理强度按钮中，用红色滑条调节该模型支持的档位；右上角重置恢复该模型默认强度。最高档有短暂光晕动画。模型与强度在当前会话保存；其上下文策略独立；动态文件、浏览器和 MCP 工具直接接入 Dragon 工具层。关闭工作台会收进托盘，任务继续；托盘右键可退出应用。
+## 计划模式
 
-同一 Dragon 聊天可在任务结束后直接更换模型，历史和草稿保留；跨 Codex / Dragon 通道会携带可审核摘录创建新聊天。权限说明位于权限菜单各选项中。
+从输入栏左下角“＋ → 计划模式”开启，或用计划卡上的“继续修改”重新进入。
 
-## 霜璃、参考资料与对话权限
+- **只对下一轮生效**：这一轮结束后自动回到执行模式。
+- 计划期只暴露只读工具和 `plan_submit`，隐藏终端、写入和未审核 MCP 工具。
+- 计划可包含多个版本；只有最新、未过期、没有待决问题的计划可以确认执行。重复确认同一个 commandId 幂等。
+- 执行阶段恢复执行模式提示和正常工具；先前计划限制结束。
+- 用户提示词明确写“先制定计划”“只讨论方案，不要执行”等时，仅当前轮自动进入计划模式，不会黏到后续对话。
 
-默认人设是银白长发、紫瞳的龙娘霜璃：闲聊轻快，做事认真。已有对话继续时也会采用新的人设。
+## 模型与协作
 
-输入框左下角的“+”可上传图片或文件、关联历史聊天；也可以把图片或文件直接拖进输入框，或按 Ctrl+V 粘贴剪贴板里的图片。拖入时输入框会给出提示；超过 32 MB 或超过 10 份会就地说明。支持 UTF-8 文本/代码、PDF、DOCX 和 PNG/JPEG/WebP/GIF；单文件最多 32 MB，每条消息最多 10 份资料。图片导入副本会适配到最长边 1536 像素，原文件不变；GIF 读取静态帧。PDF/Word 本地提取文字，扫描文档暂不做 OCR。关联聊天保存文字快照，不继承原会话权限。气泡拥有独立输入与附件包，自动接续聊天时不会覆盖工作台草稿。
+- 模型菜单包含 **Codex**、**其他模型**、**协作** 三个通道。
+- 同一通道内切换直接生效；跨 Codex/Dragon 切换也保留当前聊天，下一条消息会带上最近 8 条对话摘录。
+- Codex 模型和推理强度按会话保存；Dragon 连接支持 DeepSeek 思考档位（官方端点）和不同服务商配置。
+- **协作模式**：GPT 负责规划与只读复核，DeepSeek 执行；先在计划卡确认再执行。模型菜单顶部可直接“退出协作”，不会新开聊天。
+- 模型切换、协作配置在任务或审批进行中会被拒绝，需先停止或等待结束。
 
-“+”右侧的权限仅作用于当前对话，任务运行时不能切换：
+## 桌宠与外观
 
-- **全请求批准**：读取、文件修改、浏览器和外部工具操作请求确认。
-- **帮我批准**：自动批准工具和命令；文件与浏览器工具仍遵守当前授权范围。命令以当前系统账号运行，不是操作系统级目录沙箱。
-- **完全放开**：自动批准，并允许访问其他目录和网站，仍保留文件版本校验、取消和子任务范围约束。
+- 「召唤龙娘」或 `Ctrl + Alt + D` 显示/收起桌宠；单击、双击、拖动、右键菜单、气泡输入与审批保留。
+- 气泡支持简约/详细模式；简约模式保留快速输入，详细模式展开聊天、附件和设置。
+- 桌宠空闲时会按配置散步或跑动，支持睡觉/唤醒；提供安静、标准、活泼预设，可调首次等待、间隔、速度、距离、往返次数和跑动概率。皮肤缺少动作时回退到待机。
+- 外观工坊支持壁纸、壁纸区域透明度、亮/暗/跟随系统、强调色、字号和密度、预设；壁纸位于原生标题按钮下方，输入栏保持不透明。
 
-官方 DeepSeek API 配置默认提供 deepseek_web_search / deepseek_web_fetch，复用该配置密钥；可在模型设置中关闭。不需要 DSH，也不要求 Tavily。工具结果保留来源，查询失败会显示错误。
+## 角色插画
 
-## 上下文与本地数据
+- 独立插画页：创作对话、提示词整理、正负面提示词、参数、Pixiv 参考、生成结果和历史版本。
+- Pixiv 登录与作品检索在独立窗口完成；参考图只保存本地副本。
+- 本地生成通过 ComfyUI 调度，支持 Anima 与 Animagine/SDXL；LoRA 可搜索 Civitai、粘贴链接或导入本地 SafeTensors，校验架构与 SHA256 后才启用。
+- 真实 ComfyUI 冷启动和 Animagine 768×1024 单图已在本机验收；模型和节点许可见各自来源，仓库不分发权重。
 
-自研通道的**总上下文上限为 524,288 tokens（512K，非字节）**，取它与配置的模型窗口的较小值。最大输出不超过 32,768 tokens，预留摘要空间，约 80% 开始压缩；小窗口按比例缩小输出和预留。默认适配器使用保守估算，界面明确标记；服务商返回的用量会覆盖估算显示。可扩展适配器提供精确计数。应用无法扩大模型本身的窗口。
+## 云端桌宠制作
 
-摘要保留目标、约束、结论、文件变更和未完成事项；工具调用及结果成对保留。完整压缩前历史和大型工具输出保存为本地附件，可按需读取。API 请求重试不会再次执行已有工具结果；中断后缺失结果标为未知，不自动重放审批或副作用。
+「制作桌宠」使用火山方舟（Ark）生成角色立绘和动作视频：
 
-数据在 `%APPDATA%/DragonAgent`，独立于两个原项目。`dragonagent.db` 保存桌面状态、配置、记忆和系统加密后的密钥；`agent-core.db` 保存内核记录、工具/审批事件与附件。模型密钥通过私有进程通信交给后台，不写入模型配置或日志。Codex 使用应用自己的账号目录。
+1. 配置 API Key、已开通的 Seedream/Seedance 模型 ID、价格、分辨率和时长能力。
+2. 创建立绘，确认角色后选择动作与预算。
+3. 云端任务返回后下载原片，用本地 FFmpeg 抠像、整理为 272×272 透明 WebM，并做技术检查。
+4. 逐项人工确认后发布到桌宠库；原片和检查报告保留。
 
-升级前自动备份旧版数据库。旧 DSH 会话成为只读历史，继续时新建 Dragon 会话，把可编辑的文字摘录放进草稿，审核后再发送，不复用 DSH 原生状态。Legacy 也只读导入。长期记忆只保存用户明确选择的内容。
+- 提交前保存请求编号，收到远端任务号后才标记为已提交。
+- 结果未知时保留预算，必须人工核对：录入远端任务号后只查询、不重提；确认未受理才释放预留并记录审计。
+- 重新整理/换抠像参数不重新发起付费生成。
+- 需要真实账单和人工目检；自动检查不能证明角色身份或肢体正确。
 
-子 Agent 不得扩大父任务授权，只接收分配的目标和资料。命令和外部 MCP 程序仍按当前 Windows 账号权限运行；审批和范围检查不等于操作系统容器。
+## 数据与安全
 
-## 开发与独立框架
+- 数据目录：`%APPDATA%\DragonAgent`。
+  - `dragonagent.db`：桌面状态、配置、记忆和系统加密后的密钥。
+  - `agent-core.db`：内核会话、工具/审批事件、附件索引。
+  - `studio/`、`illustration/`、`workshop/`：云端桌宠、插画和历史工坊素材。
+- 密钥通过 Electron `safeStorage` 加密，不写入模型配置或日志；聊天与桌宠共享本地数据。
+- 仓库不包含账号、密钥、数据库或浏览器用户目录；发行包会检查违禁文件。
+- 命令和 MCP 程序以当前 Windows 账号权限运行。需要更强隔离时应使用独立系统账号或虚拟机。
 
-主要语言为 TypeScript；Electron + React 承载桌面。开发需要 Node 24、pnpm。`pnpm install` → `pnpm build` → `pnpm start`。
+## 开发
 
-- `packages/agent-core`：独立框架、公开 API 与 SQLite 适配；详见包内 README。
-- `src/main/agent-worker.ts`：Electron 独立后台进程中的宿主适配。
-- `src/main/dragon.ts`：桌面与后台通信；`runtime.ts` 管理界面状态和系统能力。
-- `src/main/codex.ts`：可选 Codex app-server 通道，工具直接走 Dragon。
-- `src/pet`、`assets/skins`：复用的原版龙娘和受控文件/浏览器工具。
-- `src/renderer`：银白工作台、共享气泡与协作任务树。
-- `src/main/workshop`：独立工作流存储、ComfyUI 调度、图集处理与皮肤库；CPU 图片处理运行在专用 Worker。
+要求：Windows 10/11、Node.js 24、pnpm。
 
-独立运行：`node examples/node.mjs`。默认使用本地 HTTP 模型模拟器，完成两轮对话和两次工具调用，不需 Electron、真实密钥或付费请求。`--live` 使用明确设置的 `DRAGON_BASE_URL`、`DRAGON_MODEL`、`DRAGON_PROTOCOL`、`DRAGON_API_KEY`，可选 `DRAGON_CONTEXT`。`npm pack ./packages/agent-core` 可生成其他 TypeScript 项目安装的框架包。
+```powershell
+pnpm install
+pnpm build
+pnpm start
+```
 
-## 验证与构建
+常用验证：
 
-- `pnpm exec tsx scripts/workshop-check.ts`：真实 HTTP/SQLite/图片处理路径的本地 ComfyUI 协议模拟验收，不代表真实模型生成。
-- `node scripts/workshop-ui-check.mjs`：工坊浅深主题、最小窗口、100%/150% 缩放、预览及桌宠应用的 Electron 集成验收。
-- `pnpm test`：协议、并行/取消、授权、预算、压缩、冲突写入、MCP 故障与迁移恢复。
-- `node scripts/drop-check.mjs`：真实 Electron 中把图片拖入输入框、粘贴图片、超限拒绝，并核对落盘 PNG。
-- `node scripts/illustration-layout-check.mjs`：角色插画页三列布局与滚动回归，含宽／窄两档截图。
-- `node scripts/civitai-key-check.mjs`：真实 Electron 中加密保存 Civitai 密钥，校验密文落盘、状态回显与清除。
-- `node scripts/ui-check.mjs`：真实 Electron + 本地模型服务，跨窗口草稿、重复发送、审批、子任务和落盘结果；截图在 `test-results`。
-- `node scripts/compositor-check.mjs`：浅色、深色背景上的 Windows 桌面透明合成检查。两种界面测试均可通过 `DRAGON_EXE` 指定发行版入口。
-- `node scripts/smoke.mjs`：独立数据目录的启动检查。
-- `pnpm exec tsx scripts/codex-check.ts`：原生 Codex 初始化；不登录、不发送模型请求。
-- `pnpm package`：构建、复制已安装的固定版本 Codex 原生程序、准备标准 npm 运行依赖，再生成 Windows x64 安装包和 ZIP。
-- `node scripts/release-check.mjs`：核对发行依赖、构建文件和交付校验值；需先把独立内核包放入对应发行目录。
-- `pwsh -File scripts/promote-release.ps1`：完成发行检查且应用没有执行任务并退出后，逐文件校验新版本，备份旧固定入口并完整替换。不会覆盖 `%APPDATA%/DragonAgent`。
-- `node scripts/run-live-check.mjs`：显式启动真实发行版的在线验收模式，使用应用原有加密环境读取已保存的凭据，进行模型计算工具、Tavily 搜索和 Codex 只读任务验证。报告不含密钥。
+```powershell
+pnpm test                    # 单元/集成测试
+pnpm typecheck
+pnpm test:ui                 # 真实 Electron 工作台/桌宠/审批回归
+pnpm test:planning           # 计划模式端到端
+pnpm test:model-switch       # 聊天内切换模型/退出协作
+pnpm test:media              # 真实 FFmpeg 抠像链路
+pnpm test:appearance         # 主题/尺寸/缩放矩阵
+pnpm test:illustration-layout
+```
 
-Electron 界面测试请从正常 Windows 用户环境运行；受限账号的 AppContainer 权限可能导致 Electron 在创建窗口前异常退出。发行包不含测试数据、账号、密钥或浏览器用户目录。
+发行构建：
 
-本地模拟验收和真实在线验收分开记录，见 `docs/RELEASE-0.3.0.md` 和 `docs/ACCEPTANCE.md`。本地模拟通过不代表在线服务已验收，具体状态以记录为准。
+```powershell
+pnpm package                 # 构建、准备 Codex/媒体运行时、生成安装包与 ZIP
+node scripts/release-check.mjs
+```
+
+`release-check` 会核对版本、违禁文件、主进程编译产物、图标和产物哈希，并把结果写入 `test-results/release-check.json`。`scripts/promote-release.ps1` 只应在验收通过、应用空闲并备份后执行。
+
+### 目录
+
+- `packages/agent-core`：独立 Agent 内核、协议适配、工具注册/审批、预算、摘要、SQLite/内存存储。
+- `src/main/agent-worker.ts`：Electron 独立后台进程中的内核宿主。
+- `src/main/dragon.ts`、`runtime.ts`：桌面与内核 RPC、会话状态和系统能力。
+- `src/main/studio`：方舟客户端、预算/恢复状态机、FFmpeg 媒体与桌宠库。
+- `src/main/illustration`：Pixiv、ComfyUI、提示词 Agent 和插画存储。
+- `src/pet`：桌宠渲染、视频/图集/骨架、空闲行为与动作映射。
+- `src/renderer`：工作台、外观工坊、计划卡/检查器和桌宠气泡。
+- `assets/skins`：内置桌宠素材；`docs/`：发行、验收和素材规范。
+
+## 验证与发行状态
+
+以下结果基于当前源码 `b80b328`：
+
+- `pnpm test`：**91 通过、0 失败**。
+- `pnpm typecheck`、`pnpm build`：通过（Vite 主 chunk 体积警告仍在）。
+- 已通过：工作台/队列、计划模式一次性与提示词触发、聊天内模型切换、云端桌宠模拟状态机、真实 FFmpeg 媒体链路、桌宠库、外观/尺寸/缩放矩阵、插画布局、原生标题栏、真实 ComfyUI 冷启动 + Animagine 单图、打包冒烟。
+- **未完成**：真实方舟付费立绘/视频验收、真实 Pixiv 登录/识图验收、真实云端账单核对、安装包签名与 FFmpeg GPL 分发合规最终确认。
+- **未执行**：替换固定入口 `release\win-unpacked`、创建 GitHub Release。
+
+### 候选产物
+
+`release/0.7.0/` 下已生成并通过 `release-check`：
+
+| 文件 | 大小 | SHA256 |
+|---|---|---|
+| `DragonAgent-Setup-0.7.0.exe` | 312.9 MB | `3125e24239d15ab1a1639083dd6cac36b8499aacd957cea59f3c5cd2f36ee6f8` |
+| `DragonAgent-0.7.0-win.zip` | 423.6 MB | `5c36b14b07e2d12d48a5a7ebe85224428d31f22f0090fed69d9229407416b708` |
+| `dragon-agent-core-0.4.0.tgz` | 61 KB | `f4e304adb6cda52c2b5c760d66ff339710b9bf3c500193b018e5fecccb205665` |
+
+校验文件：`release/0.7.0/SHA256SUMS.txt`。产物在 `.gitignore` 中，不随源码提交。
+
+## 文档
+
+- [0.7.0 实施记录](docs/IMPLEMENTATION-0.7.0.md)
+- [0.7.0 验收报告](docs/ACCEPTANCE-0.7.0.md)
+- [0.7.0 候选发布说明](docs/RELEASE-0.7.0.md)
+- [自研内核实现](IMPLEMENTATION.md)
+- [创作工坊与 ComfyUI](docs/CREATIVE-STUDIO.md)
+- [桌宠动画素材规范](docs/PET-ANIMATION-SPEC.md)
+- [发行记录 0.4.0](docs/RELEASE-0.4.0.md)、[0.3.0](docs/RELEASE-0.3.0.md)
+
+## 第三方与许可
+
+- Electron、React、Sharp 等依赖使用各自许可证。
+- 可选 Codex 运行时由打包脚本复制，需遵守其许可证。
+- 发行包附带 FFmpeg/ffprobe（GPL-3.0）及许可、源码地址和构建说明；正式发布前需完成分发合规确认。
+- ComfyUI、Anima/Animagine、Wan、BiRefNet、Pixiv 内容等由用户自行安装或获取，仓库不分发相应模型权重和素材。
