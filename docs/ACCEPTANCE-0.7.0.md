@@ -29,7 +29,7 @@
 | 原生标题栏 | `node scripts/window-chrome-check.mjs`：原生命中、双击最大化消息、亮/暗标题像素；物理拖拽因 Windows 前台限制未验证 | 通过（拖拽待补） |
 | 真实 Pixiv/识图 | 需要 Pixiv 登录后集中验收 | **未执行** |
 | 固定入口替换 | `release\win-unpacked` 未替换（等待验收通过、空闲、备份） | **未执行** |
-| GitHub 源码推送 | `main` 与 `origin/main` 均为 `b80b328`，工作区干净、无未推送提交 | 完成 |
+| GitHub 源码推送 | `main` 已与 `origin/main` 同步；本次复核基于功能提交 `b80b328`，工作区干净 | 完成 |
 
 ## 候选产物
 
